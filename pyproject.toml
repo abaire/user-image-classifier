@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "user-image-classifier"
+dynamic = ["version"]
+description = ''
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "Erik Abair", email = "erik.abair@gmail.com" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = [
+    "pillow~=11.3.0",
+]
+
+[project.urls]
+Documentation = "https://github.com/abaire/user-image-classifier#readme"
+Issues = "https://github.com/abaire/user-image-classifier/issues"
+Source = "https://github.com/abaire/user-image-classifier"
+
+[project.scripts]
+imgclassifier = "user_image_classifier:run"
+
+[tool.hatch.version]
+path = "src/user_image_classifier/__about__.py"
+
+[tool.hatch.envs.types]
+extra-dependencies = [
+  "mypy>=1.0.0",
+]
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/user_image_classifier tests}"
+
+[tool.coverage.run]
+source_pkgs = ["user_image_classifier", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/user_image_classifier/__about__.py",
+]
+
+[tool.coverage.paths]
+user_image_classifier = ["src/user_image_classifier", "*/user-image-classifier/src/user_image_classifier"]
+tests = ["tests", "*/user-image-classifier/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]

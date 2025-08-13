@@ -1,0 +1,15 @@
+DEFAULT_CONFIG = {
+    "a": "bobcats",
+    "b": "birds",
+    "c": "coyote",
+    "d": "deer",
+    "e": "empty",
+    "f": "foxes",
+    "h": "humans",
+    "k": "skunks",
+    "m": "mountain_lions",
+    "o": "dogs",
+    "r": "raccoons",
+    "s": "squirrels",
+    "u": "unknown",
+}
