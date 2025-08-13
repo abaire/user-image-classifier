@@ -106,7 +106,14 @@ class ImageClassifierGUI:
         source_path = self.image_paths.pop(self.current_index)
         filename = os.path.basename(source_path)
         dest_dir = self.key_map[key]
-        dest_path = os.path.join(self.output_root, dest_dir, filename)
+        dest_path_dir = os.path.join(self.output_root, dest_dir)
+        dest_path = os.path.join(dest_path_dir, filename)
+
+        suffix = 1
+        filename_without_ext, filename_ext = os.path.splitext(filename)
+        while os.path.isfile(dest_path):
+            new_filename = f"filename_without_ext_{suffix:4d}.{filename_ext}"
+            dest_path = os.path.join(dest_path_dir, new_filename)
 
         shutil.move(source_path, dest_path)
         print(f"✅ Moved: '{filename}' -> '{dest_dir}'")
