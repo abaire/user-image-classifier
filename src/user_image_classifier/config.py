@@ -1,10 +1,12 @@
 DEFAULT_CONFIG = {
+    "1": "hawks",
     "a": "bobcats",
     "b": "birds",
     "c": "coyote",
     "d": "deer",
     "e": "empty",
     "f": "foxes",
+    "g": "eagles",
     "h": "humans",
     "k": "skunks",
     "m": "mountain_lions",
@@ -12,4 +14,5 @@ DEFAULT_CONFIG = {
     "r": "raccoons",
     "s": "squirrels",
     "u": "unknown",
+    "w": "owls",
 }
