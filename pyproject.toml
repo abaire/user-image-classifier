@@ -64,3 +64,15 @@ exclude_lines = [
   "if __name__ == .__main__.:",
   "if TYPE_CHECKING:",
 ]
+
+[tool.hatch.envs.test]
+extra-dependencies = [
+    "pytest",
+    "coverage",
+]
+
+[tool.hatch.envs.hatch-test]
+extra-dependencies = [
+    "pytest",
+    "coverage",
+]
