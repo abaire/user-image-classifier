@@ -39,6 +39,7 @@ class ImageClassifierGUI:
         self.root.title("Image Classifier")
 
         banner_text = " | ".join([f"'{key}': {folder}" for key, folder in self.key_map.items()])
+        banner_text += "\nESC: Quit  SPACE: Leave file  Backspace: Undo"
         self.banner_label = tk.Label(self.root, text=banner_text, font=("Helvetica", 14), pady=5)
         self.banner_label.pack()
 
@@ -90,6 +91,8 @@ class ImageClassifierGUI:
             self.navigate(1)
         elif key == "left":
             self.navigate(-1)
+        elif key == "space":
+            self.abandon_file()
         elif event.char.lower() in self.key_map:
             self.move_image(event.char.lower())
 
@@ -100,6 +103,17 @@ class ImageClassifierGUI:
         new_index = (self.current_index + delta) % len(self.image_paths)
         self.current_index = new_index
         self.display_image()
+
+    def _update_after_removal(self):
+        if self.image_paths and self.current_index >= len(self.image_paths):
+            self.current_index = len(self.image_paths) - 1
+
+        self.display_image()
+
+    def abandon_file(self):
+        source_path = self.image_paths.pop(self.current_index)
+        self.last_move = (None, source_path, self.current_index)
+        self._update_after_removal()
 
     def move_image(self, key: str):
         """Moves the current image to the directory mapped to the given key."""
@@ -119,10 +133,7 @@ class ImageClassifierGUI:
         print(f"✅ Moved: '{filename}' -> '{dest_dir}'")
         self.last_move = (dest_path, source_path, self.current_index)
 
-        if self.image_paths and self.current_index >= len(self.image_paths):
-            self.current_index = len(self.image_paths) - 1
-
-        self.display_image()
+        self._update_after_removal()
 
     def undo_last_move(self):
         """Undoes the last file move operation."""
@@ -131,11 +142,13 @@ class ImageClassifierGUI:
             return
 
         moved_path, original_path, original_index = self.last_move
-        shutil.move(moved_path, original_path)
+
+        if moved_path:
+            shutil.move(moved_path, original_path)
+            print(f"↩️ UNDO: Moved '{os.path.basename(moved_path)}' back.")
 
         self.image_paths.insert(original_index, original_path)
         self.current_index = original_index
-        print(f"↩️ UNDO: Moved '{os.path.basename(moved_path)}' back.")
 
         self.last_move = None
         self.display_image()
