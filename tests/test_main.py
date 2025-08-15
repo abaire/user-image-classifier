@@ -1,9 +1,15 @@
-import pytest
-from pathlib import Path
-import sys
+import json
 import os
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+import pytest
+
+from user_image_classifier.config import DEFAULT_CONFIG
+from user_image_classifier.main import ImageClassifierGUI, _load_key_map
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 from user_image_classifier.main import _find_sources
 
@@ -57,11 +63,6 @@ def test_find_sources(tmp_path: Path):
     assert found_files == expected_files
 
 
-import json
-from user_image_classifier.main import _load_key_map
-from user_image_classifier.config import DEFAULT_CONFIG
-
-
 def test_load_key_map_with_config_file(tmp_path: Path):
     config_data = {"a": "dir_a", "b": "dir_b"}
     config_file = tmp_path / "config.json"
@@ -74,12 +75,6 @@ def test_load_key_map_with_config_file(tmp_path: Path):
 def test_load_key_map_no_config_file():
     key_map = _load_key_map(None)
     assert key_map == DEFAULT_CONFIG
-
-
-from unittest.mock import MagicMock, patch
-import shutil
-import tkinter as tk
-from user_image_classifier.main import ImageClassifierGUI
 
 
 @pytest.fixture
@@ -102,9 +97,9 @@ def mock_gui(tmp_path: Path):
     for folder in key_map.values():
         (output_root / folder).mkdir()
 
-    with patch("tkinter.Tk"), patch("tkinter.Label"), patch(
-        "PIL.ImageTk.PhotoImage"
-    ), patch("PIL.Image.open") as mock_open:
+    with patch("tkinter.Tk"), patch("tkinter.Label"), patch("PIL.ImageTk.PhotoImage"), patch(
+        "PIL.Image.open"
+    ) as mock_open:
         mock_image = MagicMock()
         mock_image.size = (100, 100)
         mock_image.resize.return_value = mock_image
@@ -170,7 +165,7 @@ def test_abandon_file(mock_gui):
 
     assert len(gui.image_paths) == initial_image_count - 1
     assert gui.last_move is not None
-    assert gui.last_move[0] is None # No destination path for abandon
+    assert gui.last_move[0] is None  # No destination path for abandon
 
 
 def test_undo_last_move(mock_gui):
