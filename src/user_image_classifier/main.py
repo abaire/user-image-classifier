@@ -5,6 +5,7 @@ import argparse
 import itertools
 import json
 import os
+import re
 import shutil
 import sys
 import tkinter as tk
@@ -15,13 +16,36 @@ from PIL import Image, ImageTk
 
 from user_image_classifier.config import DEFAULT_CONFIG
 
+CONFIDENCE_PREFIX_RE = re.compile(r"C\d\d_(.+)")
+CONFIDENCE_SUFFIX_RE = re.compile(r"(.+)_C\d\d(\..+)")
+
+
+def _remove_confidence_substring(filename: str) -> str:
+    match = CONFIDENCE_PREFIX_RE.match(filename)
+    if match:
+        return match.group(1)
+
+    match = CONFIDENCE_SUFFIX_RE.match(filename)
+    if match:
+        return f"{match.group(1)}{match.group(2)}"
+
+    return filename
+
 
 class ImageClassifierGUI:
     """
     A GUI application for classifying images using keyboard shortcuts.
     """
 
-    def __init__(self, root: tk.Tk, image_paths: set[str], key_map: dict[str, str], output_root: str):
+    def __init__(
+        self,
+        root: tk.Tk,
+        image_paths: set[str],
+        key_map: dict[str, str],
+        output_root: str,
+        *,
+        strip_confidence: bool = False,
+    ):
         """
         Initializes the classifier GUI.
 
@@ -29,12 +53,15 @@ class ImageClassifierGUI:
             root: The root tkinter window.
             image_paths: A set of absolute paths to the images to be classified.
             key_map: A dictionary mapping keyboard keys to directory names.
+            output_root: Directory into which classified files should be placed.
+            strip_confidence: If True, strip "Cxx" confidence prefix/suffix from filenames.
         """
         self.root = root
         self.image_paths = sorted(image_paths)
         self.key_map = key_map
         self.last_move = None
         self.output_root = output_root
+        self.strip_confidence = strip_confidence
 
         self.root.title("Image Classifier")
 
@@ -119,6 +146,8 @@ class ImageClassifierGUI:
         """Moves the current image to the directory mapped to the given key."""
         source_path = self.image_paths.pop(self.current_index)
         filename = os.path.basename(source_path)
+        if self.strip_confidence:
+            filename = _remove_confidence_substring(filename)
         dest_dir = self.key_map[key]
         dest_path_dir = os.path.join(self.output_root, dest_dir)
         dest_path = os.path.join(dest_path_dir, filename)
@@ -182,9 +211,9 @@ def _find_sources(input_dirs: list[str], output_dir: str) -> set[str]:
     return {filename for filename in all_files if keep_file(filename)}
 
 
-def _run_gui(image_paths: set[str], key_map: dict[str, str], output_root: str):
+def _run_gui(image_paths: set[str], key_map: dict[str, str], output_root: str, *, strip_confidence: bool = False):
     root = tk.Tk()
-    ImageClassifierGUI(root, image_paths, key_map, output_root)
+    ImageClassifierGUI(root, image_paths, key_map, output_root, strip_confidence=strip_confidence)
     root.update_idletasks()
 
     screen_width = root.winfo_screenwidth()
@@ -214,6 +243,12 @@ def main() -> int:
         required=True,
         help="One or more source directories to search for JPGs recursively.",
     )
+    parser.add_argument(
+        "--strip-confidence",
+        "-S",
+        action="store_true",
+        help="Strip Cxx prefix/suffix from filenames with confidence scores.",
+    )
     parser.add_argument("--output", "-o", help="Base directory into which classified files should be moved")
     args = parser.parse_args()
 
@@ -240,7 +275,7 @@ def main() -> int:
     print("  Press 'q' or 'esc' -> Quit")
     print("----------------\n")
 
-    _run_gui(image_paths, key_map, args.output)
+    _run_gui(image_paths, key_map, args.output, strip_confidence=args.strip_confidence)
     return 0
 
 
