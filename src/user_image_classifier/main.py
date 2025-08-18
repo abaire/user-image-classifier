@@ -16,20 +16,32 @@ from PIL import Image, ImageTk
 
 from user_image_classifier.config import DEFAULT_CONFIG
 
-CONFIDENCE_PREFIX_RE = re.compile(r"C\d\d_(.+)")
-CONFIDENCE_SUFFIX_RE = re.compile(r"(.+)_C\d\d(\..+)")
+CONFIDENCE_PREFIX_RE = re.compile(r"C(\d+)_(.+)")
+CONFIDENCE_SUFFIX_RE = re.compile(r"(.+)_C(\d+)(\..+)")
 
 
 def _remove_confidence_substring(filename: str) -> str:
     match = CONFIDENCE_PREFIX_RE.match(filename)
     if match:
-        return match.group(1)
+        return match.group(2)
 
     match = CONFIDENCE_SUFFIX_RE.match(filename)
     if match:
-        return f"{match.group(1)}{match.group(2)}"
+        return f"{match.group(1)}{match.group(3)}"
 
     return filename
+
+
+def _get_confidence(filename: str) -> int | None:
+    match = CONFIDENCE_PREFIX_RE.match(filename)
+    if match:
+        return int(match.group(1))
+
+    match = CONFIDENCE_SUFFIX_RE.match(filename)
+    if match:
+        return int(match.group(2))
+
+    return None
 
 
 class ImageClassifierGUI:
@@ -43,6 +55,8 @@ class ImageClassifierGUI:
         image_paths: set[str],
         key_map: dict[str, str],
         output_root: str,
+        min_confidence_threshold: int | None = None,
+        max_confidence_threshold: int | None = None,
         *,
         strip_confidence: bool = False,
     ):
@@ -64,6 +78,21 @@ class ImageClassifierGUI:
         self.strip_confidence = strip_confidence
 
         self.root.title("Image Classifier")
+
+        if min_confidence_threshold or max_confidence_threshold:
+            if min_confidence_threshold is None:
+                min_confidence_threshold = 0
+            if max_confidence_threshold is None:
+                max_confidence_threshold = 100
+
+            def _keep_filename(filename: str) -> bool:
+                confidence = _get_confidence(os.path.basename(filename))
+                if confidence is None:
+                    return True
+
+                return confidence >= min_confidence_threshold and confidence <= max_confidence_threshold
+
+            self.image_paths = list(filter(_keep_filename, self.image_paths))
 
         banner_text = " | ".join([f"'{key}': {folder}" for key, folder in self.key_map.items()])
         banner_text += "\nESC: Quit  SPACE: Leave file  Backspace: Undo"
@@ -211,9 +240,25 @@ def _find_sources(input_dirs: list[str], output_dir: str) -> set[str]:
     return {filename for filename in all_files if keep_file(filename)}
 
 
-def _run_gui(image_paths: set[str], key_map: dict[str, str], output_root: str, *, strip_confidence: bool = False):
+def _run_gui(
+    image_paths: set[str],
+    key_map: dict[str, str],
+    output_root: str,
+    min_confidence_threshold: int | None,
+    max_confidence_threshold: int | None,
+    *,
+    strip_confidence: bool = False,
+):
     root = tk.Tk()
-    ImageClassifierGUI(root, image_paths, key_map, output_root, strip_confidence=strip_confidence)
+    ImageClassifierGUI(
+        root,
+        image_paths,
+        key_map,
+        output_root,
+        min_confidence_threshold=min_confidence_threshold,
+        max_confidence_threshold=max_confidence_threshold,
+        strip_confidence=strip_confidence,
+    )
     root.update_idletasks()
 
     screen_width = root.winfo_screenwidth()
@@ -249,6 +294,20 @@ def main() -> int:
         action="store_true",
         help="Strip Cxx prefix/suffix from filenames with confidence scores.",
     )
+    parser.add_argument(
+        "--min-confidence-threshold",
+        "-T",
+        type=int,
+        metavar="confidence_percent",
+        help="Skip files with confidence less than <confidence_percent>",
+    )
+    parser.add_argument(
+        "--max-confidence-threshold",
+        "-X",
+        type=int,
+        metavar="confidence_percent",
+        help="Skip files with confidence greater than <confidence_percent>",
+    )
     parser.add_argument("--output", "-o", help="Base directory into which classified files should be moved")
     args = parser.parse_args()
 
@@ -275,7 +334,14 @@ def main() -> int:
     print("  Press 'q' or 'esc' -> Quit")
     print("----------------\n")
 
-    _run_gui(image_paths, key_map, args.output, strip_confidence=args.strip_confidence)
+    _run_gui(
+        image_paths,
+        key_map,
+        args.output,
+        min_confidence_threshold=args.min_confidence_threshold,
+        max_confidence_threshold=args.max_confidence_threshold,
+        strip_confidence=args.strip_confidence,
+    )
     return 0
 
 
