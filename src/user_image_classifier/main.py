@@ -16,32 +16,64 @@ from PIL import Image, ImageTk
 
 from user_image_classifier.config import DEFAULT_CONFIG
 
-CONFIDENCE_PREFIX_RE = re.compile(r"C(\d+)_(.+)")
-CONFIDENCE_SUFFIX_RE = re.compile(r"(.+)_C(\d+)(\..+)")
+CONFIDENCE_SUBSTRING = r"C(\d+)"
+CLASS_SUBSTRING = r"([a-zA-Z_-]+)"
+
+MULTICLASS_PREFIX_RE = re.compile(
+    f"^{CONFIDENCE_SUBSTRING}_{CLASS_SUBSTRING}_{CONFIDENCE_SUBSTRING}_{CLASS_SUBSTRING}_(.*)"
+)
+SINGLECLASS_PREFIX_RE = re.compile(f"^{CONFIDENCE_SUBSTRING}_(.*)")
+MULTICLASS_SUFFIX_RE = re.compile(
+    rf"(.*?)_{CONFIDENCE_SUBSTRING}_{CLASS_SUBSTRING}_{CONFIDENCE_SUBSTRING}_{CLASS_SUBSTRING}(\..*)?$"
+)
+SINGLECLASS_SUFFIX_RE = re.compile(rf"(.+?)_{CONFIDENCE_SUBSTRING}(\..*)?$")
 
 
 def _remove_confidence_substring(filename: str) -> str:
-    match = CONFIDENCE_PREFIX_RE.match(filename)
+    match = MULTICLASS_PREFIX_RE.match(filename)
+    if match:
+        return match.group(5)
+
+    match = SINGLECLASS_PREFIX_RE.match(filename)
     if match:
         return match.group(2)
 
-    match = CONFIDENCE_SUFFIX_RE.match(filename)
+    match = MULTICLASS_SUFFIX_RE.match(filename)
     if match:
-        return f"{match.group(1)}{match.group(3)}"
+        return f"{match.group(1)}{match.group(6) or ''}"
+
+    match = SINGLECLASS_SUFFIX_RE.match(filename)
+    if match:
+        return f"{match.group(1)}{match.group(3) or ''}"
 
     return filename
 
 
-def _get_confidence(filename: str) -> int | None:
-    match = CONFIDENCE_PREFIX_RE.match(filename)
+def _get_confidences(filename: str) -> tuple[int | None, int | None]:
+    match = MULTICLASS_PREFIX_RE.match(filename)
     if match:
-        return int(match.group(1))
+        return int(match.group(1)), int(match.group(3))
 
-    match = CONFIDENCE_SUFFIX_RE.match(filename)
+    match = SINGLECLASS_PREFIX_RE.match(filename)
     if match:
-        return int(match.group(2))
+        return int(match.group(1)), None
 
-    return None
+    match = MULTICLASS_SUFFIX_RE.match(filename)
+    if match:
+        return int(match.group(2)), int(match.group(4))
+
+    match = SINGLECLASS_SUFFIX_RE.match(filename)
+    if match:
+        return int(match.group(2)), None
+
+    return None, None
+
+
+def _get_confidence(filename: str, *, use_secondary: bool = False) -> int | None:
+    primary, secondary = _get_confidences(filename)
+    if use_secondary:
+        return secondary
+    return primary
 
 
 class ImageClassifierGUI:
@@ -59,6 +91,7 @@ class ImageClassifierGUI:
         max_confidence_threshold: int | None = None,
         *,
         strip_confidence: bool = False,
+        use_secondary_confidence: bool = False,
     ):
         """
         Initializes the classifier GUI.
@@ -69,6 +102,7 @@ class ImageClassifierGUI:
             key_map: A dictionary mapping keyboard keys to directory names.
             output_root: Directory into which classified files should be placed.
             strip_confidence: If True, strip "Cxx" confidence prefix/suffix from filenames.
+            use_secondary_confidence: If True, use the secondary confidence score for filtering.
         """
         self.root = root
         self.image_paths = sorted(image_paths)
@@ -79,18 +113,16 @@ class ImageClassifierGUI:
 
         self.root.title("Image Classifier")
 
-        if min_confidence_threshold or max_confidence_threshold:
-            if min_confidence_threshold is None:
-                min_confidence_threshold = 0
-            if max_confidence_threshold is None:
-                max_confidence_threshold = 100
+        if min_confidence_threshold is not None or max_confidence_threshold is not None:
+            min_thresh = min_confidence_threshold if min_confidence_threshold is not None else 0
+            max_thresh = max_confidence_threshold if max_confidence_threshold is not None else 100
 
             def _keep_filename(filename: str) -> bool:
-                confidence = _get_confidence(os.path.basename(filename))
+                confidence = _get_confidence(os.path.basename(filename), use_secondary=use_secondary_confidence)
                 if confidence is None:
                     return True
 
-                return confidence >= min_confidence_threshold and confidence <= max_confidence_threshold
+                return min_thresh <= confidence <= max_thresh
 
             self.image_paths = list(filter(_keep_filename, self.image_paths))
 
@@ -248,6 +280,7 @@ def _run_gui(
     max_confidence_threshold: int | None,
     *,
     strip_confidence: bool = False,
+    use_secondary_confidence: bool = False,
 ):
     root = tk.Tk()
     ImageClassifierGUI(
@@ -258,6 +291,7 @@ def _run_gui(
         min_confidence_threshold=min_confidence_threshold,
         max_confidence_threshold=max_confidence_threshold,
         strip_confidence=strip_confidence,
+        use_secondary_confidence=use_secondary_confidence,
     )
     root.update_idletasks()
 
@@ -309,6 +343,12 @@ def main() -> int:
         help="Skip files with confidence greater than <confidence_percent>",
     )
     parser.add_argument("--output", "-o", help="Base directory into which classified files should be moved")
+    parser.add_argument(
+        "--use-secondary-confidence",
+        "-U",
+        action="store_true",
+        help="Use the secondary confidence score (if present) for confidence thresholding.",
+    )
     args = parser.parse_args()
 
     key_map = _load_key_map(args.config)
@@ -341,6 +381,7 @@ def main() -> int:
         min_confidence_threshold=args.min_confidence_threshold,
         max_confidence_threshold=args.max_confidence_threshold,
         strip_confidence=args.strip_confidence,
+        use_secondary_confidence=args.use_secondary_confidence,
     )
     return 0
 
