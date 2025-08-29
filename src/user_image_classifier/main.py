@@ -92,6 +92,7 @@ class ImageClassifierGUI:
         *,
         strip_confidence: bool = False,
         use_secondary_confidence: bool = False,
+        refine_mode: bool = False,
     ):
         """
         Initializes the classifier GUI.
@@ -103,6 +104,7 @@ class ImageClassifierGUI:
             output_root: Directory into which classified files should be placed.
             strip_confidence: If True, strip "Cxx" confidence prefix/suffix from filenames.
             use_secondary_confidence: If True, use the secondary confidence score for filtering.
+            refine_mode: If True, run in refine mode.
         """
         self.root = root
         self.image_paths = sorted(image_paths)
@@ -110,6 +112,7 @@ class ImageClassifierGUI:
         self.last_move = None
         self.output_root = output_root
         self.strip_confidence = strip_confidence
+        self.refine_mode = refine_mode
 
         self.root.title("Image Classifier")
 
@@ -131,12 +134,20 @@ class ImageClassifierGUI:
         self.banner_label = tk.Label(self.root, text=banner_text, font=("Helvetica", 14), pady=5)
         self.banner_label.pack()
 
-        self.image_label = tk.Label(self.root)
-        self.image_label.pack(padx=10, pady=10)
+        self.canvas = tk.Canvas(self.root)
+        self.canvas.pack(padx=10, pady=10)
         self.root.bind("<Key>", self.handle_key_press)
+        self.canvas.bind("<ButtonPress-1>", self.on_mouse_press)
+        self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
+        self.canvas.bind("<ButtonRelease-1>", self.on_mouse_release)
+        self.canvas.bind("<ButtonPress-3>", self.clear_selection)
 
         self.current_index = 0
         self.last_move: tuple[str, str, int] | None = None
+        self.selection_coords: dict[str, int] | None = None
+        self.selection_rectangle = None
+        self.start_x = None
+        self.start_y = None
 
         self.display_image()
 
@@ -165,8 +176,9 @@ class ImageClassifierGUI:
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
         img_tk = ImageTk.PhotoImage(image)
-        self.image_label.config(image=img_tk)
-        self.image_label.image = img_tk
+        self.canvas.config(width=img_tk.width(), height=img_tk.height())
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=img_tk)
+        self.canvas.image = img_tk
 
     def handle_key_press(self, event):
         key = event.keysym.lower()
@@ -191,6 +203,7 @@ class ImageClassifierGUI:
         new_index = (self.current_index + delta) % len(self.image_paths)
         self.current_index = new_index
         self.display_image()
+        self.clear_selection()
 
     def _update_after_removal(self):
         if self.image_paths and self.current_index >= len(self.image_paths):
@@ -216,11 +229,24 @@ class ImageClassifierGUI:
         suffix = 1
         filename_without_ext, filename_ext = os.path.splitext(filename)
         while os.path.isfile(dest_path):
-            new_filename = f"filename_without_ext_{suffix:4d}.{filename_ext}"
+            new_filename = f"{filename_without_ext}_{suffix:04d}{filename_ext}"
             dest_path = os.path.join(dest_path_dir, new_filename)
 
-        shutil.move(source_path, dest_path)
-        print(f"✅ Moved: '{filename}' -> '{dest_dir}'")
+        if self.refine_mode:
+            print(f"✅ Refined: '{filename}'")
+            dest_path = source_path
+        else:
+            shutil.move(source_path, dest_path)
+            print(f"✅ Moved: '{filename}' -> '{dest_dir}'")
+
+        if self.selection_coords:
+            dest_path_without_ext, _ = os.path.splitext(dest_path)
+            json_dest_path = f"{dest_path_without_ext}.json"
+            with open(json_dest_path, "w") as f:
+                json.dump(self.selection_coords, f, indent=4)
+            print(f"💾 Saved selection coordinates to '{os.path.basename(json_dest_path)}'")
+            self.clear_selection()
+
         self.last_move = (dest_path, source_path, self.current_index)
 
         self._update_after_removal()
@@ -233,7 +259,13 @@ class ImageClassifierGUI:
 
         moved_path, original_path, original_index = self.last_move
 
-        if moved_path:
+        if self.refine_mode:
+            dest_path_without_ext, _ = os.path.splitext(moved_path)
+            json_dest_path = f"{dest_path_without_ext}.json"
+            if os.path.exists(json_dest_path):
+                os.remove(json_dest_path)
+                print(f"↩️ UNDO: Removed '{os.path.basename(json_dest_path)}'.")
+        elif moved_path:
             shutil.move(moved_path, original_path)
             print(f"↩️ UNDO: Moved '{os.path.basename(moved_path)}' back.")
 
@@ -242,6 +274,38 @@ class ImageClassifierGUI:
 
         self.last_move = None
         self.display_image()
+
+    def on_mouse_press(self, event):
+        """Records the starting coordinates of the selection."""
+        self.start_x = event.x
+        self.start_y = event.y
+        if self.selection_rectangle:
+            self.canvas.delete(self.selection_rectangle)
+
+    def on_mouse_drag(self, event):
+        """Draws the selection rectangle on the canvas."""
+        if self.selection_rectangle:
+            self.canvas.delete(self.selection_rectangle)
+        self.selection_rectangle = self.canvas.create_rectangle(
+            self.start_x, self.start_y, event.x, event.y, outline="red", width=2
+        )
+
+    def on_mouse_release(self, event):
+        """Stores the final coordinates of the selection."""
+        self.selection_coords = {
+            "x1": min(self.start_x, event.x),
+            "y1": min(self.start_y, event.y),
+            "x2": max(self.start_x, event.x),
+            "y2": max(self.start_y, event.y),
+        }
+
+    def clear_selection(self, event=None):
+        """Clears the selection rectangle and coordinates."""
+        del event
+        if self.selection_rectangle:
+            self.canvas.delete(self.selection_rectangle)
+        self.selection_rectangle = None
+        self.selection_coords = None
 
 
 def _load_key_map(config_path: str | None) -> dict[str, str]:
@@ -281,6 +345,7 @@ def _run_gui(
     *,
     strip_confidence: bool = False,
     use_secondary_confidence: bool = False,
+    refine_mode: bool = False,
 ):
     root = tk.Tk()
     ImageClassifierGUI(
@@ -292,7 +357,9 @@ def _run_gui(
         max_confidence_threshold=max_confidence_threshold,
         strip_confidence=strip_confidence,
         use_secondary_confidence=use_secondary_confidence,
+        refine_mode=refine_mode,
     )
+
     root.update_idletasks()
 
     screen_width = root.winfo_screenwidth()
@@ -349,6 +416,12 @@ def main() -> int:
         action="store_true",
         help="Use the secondary confidence score (if present) for confidence thresholding.",
     )
+    parser.add_argument(
+        "--refine",
+        "-R",
+        action="store_true",
+        help="Refine mode: only save JSON metadata, don't move files.",
+    )
     args = parser.parse_args()
 
     key_map = _load_key_map(args.config)
@@ -382,6 +455,7 @@ def main() -> int:
         max_confidence_threshold=args.max_confidence_threshold,
         strip_confidence=args.strip_confidence,
         use_secondary_confidence=args.use_secondary_confidence,
+        refine_mode=args.refine,
     )
     return 0
 
