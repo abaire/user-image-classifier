@@ -140,61 +140,88 @@ def test_navigate(mock_gui):
     assert gui.current_index == 2
 
 
-def test_move_image(mock_gui):
+def test_save_and_next_no_yolo(mock_gui):
     gui, tmp_path = mock_gui
+    gui.yolo = False  # Explicitly test the --no-yolo case
     initial_image_count = len(gui.image_paths)
-
-    # current image path before move
     current_image_path = Path(gui.image_paths[gui.current_index])
+    gui.canvas.delete = MagicMock()
 
-    gui.move_image("a")
+    # Simulate drawing and labeling two boxes
+    gui.bboxes = [
+        {"x1": 10, "y1": 10, "x2": 50, "y2": 50, "label": "class_a", "rect": 1, "label_item": 2},
+        {"x1": 60, "y1": 60, "x2": 100, "y2": 100, "label": "class_b", "rect": 3, "label_item": 4},
+        {"x1": 20, "y1": 20, "x2": 40, "y2": 40, "label": "class_a", "rect": 5, "label_item": 6},
+    ]
+
+    gui.save_and_next()
 
     assert len(gui.image_paths) == initial_image_count - 1
 
-    dest_dir = Path(tmp_path / "output" / "class_a")
-    moved_file_path = dest_dir / current_image_path.name
-    assert moved_file_path.exists()
-    assert not current_image_path.exists()
+    json_filename = current_image_path.stem + ".json"
+    output_path = tmp_path / "output" / json_filename
+    assert output_path.exists()
+
+    with open(output_path) as f:
+        data = json.load(f)
+
+    expected_data = {
+        "class_a": [{"x1": 10, "y1": 10, "x2": 50, "y2": 50}, {"x1": 20, "y1": 20, "x2": 40, "y2": 40}],
+        "class_b": [{"x1": 60, "y1": 60, "x2": 100, "y2": 100}],
+    }
+    assert data == expected_data
 
 
-def test_abandon_file(mock_gui):
+def test_undo_last_bbox(mock_gui):
     gui, _ = mock_gui
-    initial_image_count = len(gui.image_paths)
+    gui.canvas.delete = MagicMock()
 
-    gui.abandon_file()
+    # Simulate drawing and labeling a box
+    gui.bboxes = [
+        {"x1": 10, "y1": 10, "x2": 50, "y2": 50, "label": "class_a", "rect": 1, "label_item": 2},
+    ]
+    assert len(gui.bboxes) == 1
 
-    assert len(gui.image_paths) == initial_image_count - 1
-    assert gui.last_move is not None
-    assert gui.last_move[0] is None  # No destination path for abandon
+    gui.undo_last_bbox()
+
+    assert len(gui.bboxes) == 0
+    assert gui.canvas.delete.call_count == 2
 
 
-def test_undo_last_move(mock_gui):
+def test_save_and_next_yolo_is_default(mock_gui):
     gui, tmp_path = mock_gui
-
-    current_image_path = Path(gui.image_paths[gui.current_index])
-    gui.move_image("a")
-
-    assert not current_image_path.exists()
-
-    gui.undo_last_move()
-
-    assert len(gui.image_paths) == 3
-    assert current_image_path.exists()
-    assert gui.last_move is None
-
-
-def test_undo_after_abandon(mock_gui):
-    gui, _ = mock_gui
+    gui.image_width = 200
+    gui.image_height = 200
     initial_image_count = len(gui.image_paths)
-    original_path = gui.image_paths[gui.current_index]
+    current_image_path = Path(gui.image_paths[gui.current_index])
+    gui.canvas.delete = MagicMock()
 
-    gui.abandon_file()
+    # Simulate drawing and labeling two boxes
+    gui.bboxes = [
+        {"x1": 10, "y1": 10, "x2": 50, "y2": 50, "label": "class_a"},
+        {"x1": 60, "y1": 60, "x2": 100, "y2": 100, "label": "class_b"},
+    ]
+    gui.class_to_id = {"class_a": 0, "class_b": 1}
+
+    gui.save_and_next()
+
     assert len(gui.image_paths) == initial_image_count - 1
 
-    gui.undo_last_move()
-    assert len(gui.image_paths) == initial_image_count
-    assert gui.image_paths[gui.current_index] == original_path
-    assert gui.last_move is None
+    txt_filename = current_image_path.stem + ".txt"
+    output_path = tmp_path / "output" / txt_filename
+    assert output_path.exists()
+
+    with open(output_path) as f:
+        lines = f.readlines()
+
+    assert len(lines) == 2
+    # Expected: class_id x_center_norm y_center_norm width_norm height_norm
+    # Box 1 (class_a): x_center=30, y_center=30, width=40, height=40
+    # Norm: x_center=0.15, y_center=0.15, width=0.2, height=0.2
+    assert lines[0].strip() == "0 0.150000 0.150000 0.200000 0.200000"
+    # Box 2 (class_b): x_center=80, y_center=80, width=40, height=40
+    # Norm: x_center=0.4, y_center=0.4, width=0.2, height=0.2
+    assert lines[1].strip() == "1 0.400000 0.400000 0.200000 0.200000"
 
 
 @pytest.mark.parametrize(

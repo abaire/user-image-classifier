@@ -6,7 +6,6 @@ import itertools
 import json
 import os
 import re
-import shutil
 import sys
 import tkinter as tk
 from pathlib import Path
@@ -92,6 +91,7 @@ class ImageClassifierGUI:
         *,
         strip_confidence: bool = False,
         use_secondary_confidence: bool = False,
+        yolo: bool = True,
     ):
         """
         Initializes the classifier GUI.
@@ -103,13 +103,15 @@ class ImageClassifierGUI:
             output_root: Directory into which classified files should be placed.
             strip_confidence: If True, strip "Cxx" confidence prefix/suffix from filenames.
             use_secondary_confidence: If True, use the secondary confidence score for filtering.
+            yolo: If True, output annotations in YOLO format.
         """
         self.root = root
         self.image_paths = sorted(image_paths)
         self.key_map = key_map
-        self.last_move = None
         self.output_root = output_root
         self.strip_confidence = strip_confidence
+        self.yolo = yolo
+        self.class_to_id = {name: i for i, name in enumerate(sorted(self.key_map.values()))}
 
         self.root.title("Image Classifier")
 
@@ -127,21 +129,34 @@ class ImageClassifierGUI:
             self.image_paths = list(filter(_keep_filename, self.image_paths))
 
         banner_text = " | ".join([f"'{key}': {folder}" for key, folder in self.key_map.items()])
-        banner_text += "\nESC: Quit  SPACE: Leave file  Backspace: Undo"
+        banner_text += (
+            "\nDraw boxes with mouse. Press key to label. Space: Save and Next. Backspace: Undo Box. ESC: Quit"
+        )
         self.banner_label = tk.Label(self.root, text=banner_text, font=("Helvetica", 14), pady=5)
         self.banner_label.pack()
 
-        self.image_label = tk.Label(self.root)
-        self.image_label.pack(padx=10, pady=10)
+        self.canvas = tk.Canvas(self.root)
+        self.canvas.pack(padx=10, pady=10)
         self.root.bind("<Key>", self.handle_key_press)
 
         self.current_index = 0
-        self.last_move: tuple[str, str, int] | None = None
+        self.bboxes = []
+        self.rect = None
+        self.start_x = None
+        self.start_y = None
+        self.image_width = 0
+        self.image_height = 0
+
+        self.canvas.bind("<ButtonPress-1>", self.on_button_press)
+        self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
+        self.canvas.bind("<ButtonRelease-1>", self.on_button_release)
 
         self.display_image()
 
     def display_image(self):
         """Loads and displays the next image in the queue."""
+        self.bboxes = []
+        self.canvas.delete("all")
 
         if not self.image_paths:
             messagebox.showinfo("Done!", "All images have been classified.")
@@ -153,6 +168,7 @@ class ImageClassifierGUI:
         self.root.title(f"Image Classifier - {len(self.image_paths)} left - [{filename}]")
 
         image = Image.open(self.current_path)
+        self.image_width, self.image_height = image.size
 
         screen_width = self.root.winfo_screenwidth() * 0.8
         screen_height = self.root.winfo_screenheight() * 0.8
@@ -165,8 +181,9 @@ class ImageClassifierGUI:
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
         img_tk = ImageTk.PhotoImage(image)
-        self.image_label.config(image=img_tk)
-        self.image_label.image = img_tk
+        self.canvas.config(width=img_tk.width(), height=img_tk.height())
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=img_tk)
+        self.canvas.image = img_tk
 
     def handle_key_press(self, event):
         key = event.keysym.lower()
@@ -174,15 +191,15 @@ class ImageClassifierGUI:
         if key == "escape":
             self.root.destroy()
         elif key == "backspace":
-            self.undo_last_move()
+            self.undo_last_bbox()
         elif key == "right":
             self.navigate(1)
         elif key == "left":
             self.navigate(-1)
         elif key == "space":
-            self.abandon_file()
+            self.save_and_next()
         elif event.char.lower() in self.key_map:
-            self.move_image(event.char.lower())
+            self.add_label(event.char.lower())
 
     def navigate(self, delta: int):
         """Navigates through the image list by a given delta."""
@@ -198,50 +215,127 @@ class ImageClassifierGUI:
 
         self.display_image()
 
-    def abandon_file(self):
-        source_path = self.image_paths.pop(self.current_index)
-        self.last_move = (None, source_path, self.current_index)
-        self._update_after_removal()
+    def _save_yolo_format(self, filename: str):
+        txt_filename = os.path.splitext(filename)[0] + ".txt"
+        dest_path = os.path.join(self.output_root, txt_filename)
+        lines = []
+        for bbox in self.bboxes:
+            label = bbox["label"]
+            if not label:
+                continue
 
-    def move_image(self, key: str):
-        """Moves the current image to the directory mapped to the given key."""
-        source_path = self.image_paths.pop(self.current_index)
-        filename = os.path.basename(source_path)
-        if self.strip_confidence:
-            filename = _remove_confidence_substring(filename)
-        dest_dir = self.key_map[key]
-        dest_path_dir = os.path.join(self.output_root, dest_dir)
-        dest_path = os.path.join(dest_path_dir, filename)
+            class_id = self.class_to_id[label]
+            x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
 
-        suffix = 1
-        filename_without_ext, filename_ext = os.path.splitext(filename)
-        while os.path.isfile(dest_path):
-            new_filename = f"filename_without_ext_{suffix:4d}.{filename_ext}"
-            dest_path = os.path.join(dest_path_dir, new_filename)
+            box_width = x2 - x1
+            box_height = y2 - y1
+            x_center = x1 + box_width / 2
+            y_center = y1 + box_height / 2
 
-        shutil.move(source_path, dest_path)
-        print(f"✅ Moved: '{filename}' -> '{dest_dir}'")
-        self.last_move = (dest_path, source_path, self.current_index)
+            x_center_norm = x_center / self.image_width
+            y_center_norm = y_center / self.image_height
+            width_norm = box_width / self.image_width
+            height_norm = box_height / self.image_height
 
-        self._update_after_removal()
+            lines.append(f"{class_id} {x_center_norm:.6f} {y_center_norm:.6f} {width_norm:.6f} {height_norm:.6f}\n")
 
-    def undo_last_move(self):
-        """Undoes the last file move operation."""
-        if not self.last_move:
-            print("❗️ No move to undo.")
+        with open(dest_path, "w") as f:
+            f.writelines(lines)
+        print(f"✅ Saved: '{txt_filename}'")
+
+    def _save_json_format(self, filename: str):
+        json_filename = os.path.splitext(filename)[0] + ".json"
+        dest_path = os.path.join(self.output_root, json_filename)
+        output_data = {}
+        for bbox in self.bboxes:
+            label = bbox["label"]
+            if not label:
+                continue
+
+            if label not in output_data:
+                output_data[label] = []
+
+            output_data[label].append(
+                {
+                    "x1": bbox["x1"],
+                    "y1": bbox["y1"],
+                    "x2": bbox["x2"],
+                    "y2": bbox["y2"],
+                }
+            )
+
+        with open(dest_path, "w") as f:
+            json.dump(output_data, f, indent=2)
+
+        print(f"✅ Saved: '{json_filename}'")
+
+    def save_and_next(self):
+        """Saves the bounding boxes and moves to the next image."""
+        if not self.bboxes:
+            # If no bboxes, just go to next image without saving anything.
+            self.image_paths.pop(self.current_index)
+            self._update_after_removal()
             return
 
-        moved_path, original_path, original_index = self.last_move
+        source_path = self.image_paths.pop(self.current_index)
+        filename = os.path.basename(source_path)
 
-        if moved_path:
-            shutil.move(moved_path, original_path)
-            print(f"↩️ UNDO: Moved '{os.path.basename(moved_path)}' back.")
+        if self.yolo:
+            self._save_yolo_format(filename)
+        else:
+            self._save_json_format(filename)
 
-        self.image_paths.insert(original_index, original_path)
-        self.current_index = original_index
+        self._update_after_removal()
 
-        self.last_move = None
-        self.display_image()
+    def add_label(self, key: str):
+        if not self.bboxes:
+            return
+
+        # Find the last unlabeled bbox
+        for bbox in reversed(self.bboxes):
+            if bbox["label"] is None:
+                bbox["label"] = self.key_map[key]
+                x1, y1 = bbox["x1"], bbox["y1"]
+                label_item = self.canvas.create_text(x1, y1 - 5, text=bbox["label"], fill="red", anchor=tk.SW)
+                bbox["label_item"] = label_item
+                break
+
+    def undo_last_bbox(self):
+        """Undoes the last bounding box."""
+        if not self.bboxes:
+            print("❗️ No bounding box to undo.")
+            return
+
+        bbox = self.bboxes.pop()
+        self.canvas.delete(bbox["rect"])
+        if bbox["label_item"]:
+            self.canvas.delete(bbox["label_item"])
+
+        print("↩️ UNDO: Removed last bounding box.")
+
+    def on_button_press(self, event):
+        self.start_x = event.x
+        self.start_y = event.y
+        self.rect = self.canvas.create_rectangle(
+            self.start_x, self.start_y, self.start_x, self.start_y, outline="red", width=2
+        )
+
+    def on_mouse_drag(self, event):
+        cur_x, cur_y = (event.x, event.y)
+        self.canvas.coords(self.rect, self.start_x, self.start_y, cur_x, cur_y)
+
+    def on_button_release(self, event):
+        end_x, end_y = (event.x, event.y)
+        bbox = {
+            "x1": self.start_x,
+            "y1": self.start_y,
+            "x2": end_x,
+            "y2": end_y,
+            "label": None,
+            "rect": self.rect,
+            "label_item": None,
+        }
+        self.bboxes.append(bbox)
 
 
 def _load_key_map(config_path: str | None) -> dict[str, str]:
@@ -281,6 +375,7 @@ def _run_gui(
     *,
     strip_confidence: bool = False,
     use_secondary_confidence: bool = False,
+    yolo: bool = False,
 ):
     root = tk.Tk()
     ImageClassifierGUI(
@@ -292,6 +387,7 @@ def _run_gui(
         max_confidence_threshold=max_confidence_threshold,
         strip_confidence=strip_confidence,
         use_secondary_confidence=use_secondary_confidence,
+        yolo=yolo,
     )
     root.update_idletasks()
 
@@ -349,6 +445,11 @@ def main() -> int:
         action="store_true",
         help="Use the secondary confidence score (if present) for confidence thresholding.",
     )
+    parser.add_argument(
+        "--no-yolo",
+        action="store_true",
+        help="Do not emit YOLOv8 format output, use the default JSON format instead.",
+    )
     args = parser.parse_args()
 
     key_map = _load_key_map(args.config)
@@ -382,6 +483,7 @@ def main() -> int:
         max_confidence_threshold=args.max_confidence_threshold,
         strip_confidence=args.strip_confidence,
         use_secondary_confidence=args.use_secondary_confidence,
+        yolo=not args.no_yolo,
     )
     return 0
 
