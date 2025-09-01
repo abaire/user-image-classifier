@@ -180,6 +180,7 @@ class ImageClassifierGUI:
         self.crosshair_v = None
         self.crosshair_h = None
         self.undo_stack = []
+        self._undo_clears_all_bounding_boxes = False
 
         self.canvas.bind("<ButtonPress-1>", self.on_button_press)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
@@ -347,6 +348,7 @@ class ImageClassifierGUI:
         self.image_width, self.image_height = self.original_image.size
 
         self._load_existing_metadata()
+        self._undo_clears_all_bounding_boxes = bool(self.bboxes)
 
         screen_width = self.root.winfo_screenwidth() * 0.8
         screen_height = self.root.winfo_screenheight() * 0.8
@@ -563,7 +565,12 @@ class ImageClassifierGUI:
             print("❗️ No bounding box to undo.")
             return
 
-        self.bboxes.pop()
+        if self._undo_clears_all_bounding_boxes:
+            self._undo_clears_all_bounding_boxes = False
+            self.bboxes.clear()
+        else:
+            self.bboxes.pop()
+
         x, y = self.canvas.coords(self.image_on_canvas)
         self._redraw_canvas(x, y)
         print("↩️ UNDO: Removed last bounding box.")
