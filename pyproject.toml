@@ -35,6 +35,7 @@ Source = "https://github.com/abaire/user-image-classifier"
 
 [project.scripts]
 imgclassifier = "user_image_classifier:run"
+imgclassify-rename = "user_image_classifier.renamer_cli:main"
 
 [tool.hatch.version]
 path = "src/user_image_classifier/__about__.py"
@@ -70,6 +71,9 @@ extra-dependencies = [
     "pytest",
     "coverage",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
 
 [tool.hatch.envs.hatch-test]
 extra-dependencies = [

@@ -3,18 +3,13 @@ from __future__ import annotations
 # ruff: noqa: SLF001 Private member accessed
 import json
 import os
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from user_image_classifier.config import DEFAULT_CONFIG
-from user_image_classifier.main import ImageClassifierGUI, _load_key_map
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
-
-from user_image_classifier.main import _find_sources
+from user_image_classifier.config import DEFAULT_CONFIG, load_key_map
+from user_image_classifier.main import ImageClassifierGUI, _find_sources
 
 
 def test_find_sources_no_images(tmp_path: Path):
@@ -85,12 +80,12 @@ def test_load_key_map_with_config_file(tmp_path: Path):
     config_file = tmp_path / "config.json"
     config_file.write_text(json.dumps(config_data))
 
-    key_map = _load_key_map(str(config_file))
+    key_map = load_key_map(str(config_file))
     assert key_map == config_data
 
 
 def test_load_key_map_no_config_file():
-    key_map = _load_key_map(None)
+    key_map = load_key_map(None)
     assert key_map == DEFAULT_CONFIG
 
 

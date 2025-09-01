@@ -13,7 +13,7 @@ from tkinter import messagebox
 
 from PIL import Image, ImageTk
 
-from user_image_classifier.config import DEFAULT_CONFIG
+from user_image_classifier.config import load_key_map
 
 CONFIDENCE_SUBSTRING = r"C(\d+)"
 CLASS_SUBSTRING = r"([a-zA-Z_-]+)"
@@ -526,14 +526,6 @@ class ImageClassifierGUI:
         self._redraw_canvas(x, y)  # Redraw to show the new box scaled correctly
 
 
-def _load_key_map(config_path: str | None) -> dict[str, str]:
-    if not config_path:
-        return DEFAULT_CONFIG
-
-    with open(config_path) as f:
-        return json.load(f)
-
-
 def _find_sources(input_dirs: list[str]) -> set[str]:
     input_dirs = [Path(os.path.expanduser(input_dir)) for input_dir in input_dirs]
 
@@ -641,7 +633,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    key_map = _load_key_map(args.config)
+    key_map = load_key_map(args.config)
 
     image_paths = _find_sources(args.dirs)
     if not image_paths:
