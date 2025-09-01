@@ -323,6 +323,8 @@ def test_keyboard_zoom(mock_gui):
 
 def test_coordinate_saving_with_zoom(mock_gui):
     gui, _ = mock_gui
+    gui.image_width = 100
+    gui.image_height = 100
     gui.zoom_level = 2.0  # Zoom in 2x
     gui.image_on_canvas = 1
     gui.canvas.coords = MagicMock(return_value=(-50, -50))  # Simulate pan
@@ -348,6 +350,8 @@ def test_coordinate_saving_with_zoom(mock_gui):
 
 def test_drawing_new_box_discards_unlabeled(mock_gui):
     gui, _ = mock_gui
+    gui.image_width = 100
+    gui.image_height = 100
     gui.image_on_canvas = 1
     gui.canvas.coords = MagicMock(return_value=(0, 0))
     gui._redraw_canvas = MagicMock()
@@ -368,6 +372,8 @@ def test_drawing_new_box_discards_unlabeled(mock_gui):
 
 def test_drawing_new_box_retains_labeled(mock_gui):
     gui, _ = mock_gui
+    gui.image_width = 100
+    gui.image_height = 100
     gui.image_on_canvas = 1
     gui.canvas.coords = MagicMock(return_value=(0, 0))
     gui._redraw_canvas = MagicMock()
@@ -414,11 +420,15 @@ def test_zoom_centering_logic(mock_gui):
 
 def test_drawing_state_and_crosshair(mock_gui):
     gui, _ = mock_gui
+    gui.image_width = 100
+    gui.image_height = 100
     gui.image_on_canvas = 1
     gui.canvas.coords = MagicMock(return_value=(0, 0))
     gui._delete_crosshair = MagicMock()
     gui._redraw_canvas = MagicMock()  # Mock this to prevent it from running
     mock_event = MagicMock()
+    mock_event.x = 1
+    mock_event.y = 2
 
     # Initial state
     assert not gui.is_drawing

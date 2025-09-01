@@ -426,10 +426,10 @@ class ImageClassifierGUI:
             half_box_width = width_norm * self.image_width * 0.5
             half_box_height = height_norm * self.image_height * 0.5
 
-            x1 = x_center - half_box_width
-            y1 = y_center - half_box_height
-            x2 = x_center + half_box_width
-            y2 = y_center + half_box_height
+            x1 = round(x_center - half_box_width)
+            y1 = round(y_center - half_box_height)
+            x2 = round(x_center + half_box_width)
+            y2 = round(y_center + half_box_height)
 
             label = self.id_to_class.get(class_id)
             if label is None:
@@ -574,25 +574,47 @@ class ImageClassifierGUI:
         )
 
     def on_mouse_drag(self, event):
-        cur_x, cur_y = (event.x, event.y)
+        if not self.image_on_canvas:
+            cur_x, cur_y = (event.x, event.y)
+        else:
+            img_x1, img_y1, img_x2, img_y2 = self.canvas.bbox(self.image_on_canvas)
+            cur_x = max(img_x1, min(event.x, img_x2))
+            cur_y = max(img_y1, min(event.y, img_y2))
+
         self.canvas.coords(self.rect, self.start_x, self.start_y, cur_x, cur_y)
         self.canvas.coords(self.rect_bg, self.start_x, self.start_y, cur_x, cur_y)
 
     def on_button_release(self, event):
         self.is_drawing = False
+        if not self.image_on_canvas:
+            return
+
         img_x, img_y = self.canvas.coords(self.image_on_canvas)
         start_x_orig = (self.start_x - img_x) / self.zoom_level
         start_y_orig = (self.start_y - img_y) / self.zoom_level
         end_x_orig = (event.x - img_x) / self.zoom_level
         end_y_orig = (event.y - img_y) / self.zoom_level
 
+        # Clamp to image dimensions
+        start_x_clamped = max(0, min(start_x_orig, self.image_width))
+        start_y_clamped = max(0, min(start_y_orig, self.image_height))
+        end_x_clamped = max(0, min(end_x_orig, self.image_width))
+        end_y_clamped = max(0, min(end_y_orig, self.image_height))
+
         bbox = {
-            "x1": start_x_orig,
-            "y1": start_y_orig,
-            "x2": end_x_orig,
-            "y2": end_y_orig,
+            "x1": min(start_x_clamped, end_x_clamped),
+            "y1": min(start_y_clamped, end_y_clamped),
+            "x2": max(start_x_clamped, end_x_clamped),
+            "y2": max(start_y_clamped, end_y_clamped),
             "label": None,
         }
+
+        # Ignore zero-sized boxes
+        if bbox["x1"] == bbox["x2"] or bbox["y1"] == bbox["y2"]:
+            x, y = self.canvas.coords(self.image_on_canvas)
+            self._redraw_canvas(x, y)
+            return
+
         self.bboxes.append(bbox)
         x, y = self.canvas.coords(self.image_on_canvas)
         self._redraw_canvas(x, y)  # Redraw to show the new box scaled correctly
