@@ -4,7 +4,7 @@ DEFAULT_CONFIG = {
     "b": "birds",
     "c": "coyote",
     "d": "deer",
-    "e": "empty",
+    # "e": "empty",
     "f": "foxes",
     "g": "eagles",
     "h": "humans",

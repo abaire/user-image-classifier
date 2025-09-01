@@ -126,11 +126,12 @@ class ImageClassifierGUI:
             "magenta",
             "spring green",
             "light cyan",
-            "light dark blue",
+            "light slate blue",
             "gold",
             "orchid",
             "deep pink",
-            "purple",
+            "MediumPurple1",
+            "OliveDrab1",
         ]
 
         self.root.title("Image Classifier")
