@@ -48,9 +48,9 @@ def test_find_sources(tmp_path: Path):
 
     # Expected files
     expected_files = {
-        Path(input_dir1 / "image1.jpg"),
-        Path(input_dir1_sub / "image2.jpeg"),
-        Path(input_dir2 / "image3.JPG"),
+        str(Path(input_dir1 / "image1.jpg")),
+        str(Path(input_dir1_sub / "image2.jpeg")),
+        str(Path(input_dir2 / "image3.JPG")),
     }
 
     # Run the function
@@ -72,7 +72,7 @@ def test_find_sources_skips_existing(tmp_path: Path):
     (input_dir / "image2.txt").touch()  # Pre-existing label for image2
 
     found_files = _find_sources([str(input_dir)])
-    assert found_files == {Path(input_dir / "image1.jpg")}
+    assert found_files == {str(Path(input_dir / "image1.jpg"))}
 
 
 def test_load_key_map_with_config_file(tmp_path: Path):
