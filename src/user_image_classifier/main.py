@@ -260,7 +260,13 @@ class ImageClassifierGUI:
 
             if bbox["label"]:
                 label_item = self.canvas.create_text(
-                    x1, y1 - 5, text=bbox["label"], fill=color, anchor=tk.SW, tags="bbox"
+                    x1,
+                    y1 - 5,
+                    text=bbox["label"],
+                    fill=color,
+                    anchor=tk.SW,
+                    tags="bbox",
+                    font=("Helvetica", 16),
                 )
                 bbox["label_item"] = label_item
                 text_bbox = self.canvas.bbox(label_item)
