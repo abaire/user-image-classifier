@@ -4,7 +4,7 @@ import argparse
 import sys
 
 from user_image_classifier.config import load_key_map
-from user_image_classifier.renamer import rename_files
+from user_image_classifier.renamer import rename_files, undo_rename
 
 
 def main() -> int:
@@ -37,17 +37,25 @@ def main() -> int:
         action="store_true",
         help="Move files with no labels to a new 'empty' directory.",
     )
+    group.add_argument(
+        "--undo",
+        action="store_true",
+        help="Attempts to detect and remove previous runs of the script.",
+    )
 
     args = parser.parse_args()
-    key_map = load_key_map(args.config)
 
-    rename_files(
-        args.dir,
-        key_map,
-        dry_run=args.dry_run,
-        remove_empty=args.remove_empty,
-        move_empty=args.move_empty,
-    )
+    if args.undo:
+        undo_rename(args.dir, dry_run=args.dry_run)
+    else:
+        key_map = load_key_map(args.config)
+        rename_files(
+            args.dir,
+            key_map,
+            dry_run=args.dry_run,
+            remove_empty=args.remove_empty,
+            move_empty=args.move_empty,
+        )
     return 0
 
 
