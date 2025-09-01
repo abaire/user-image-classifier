@@ -98,17 +98,18 @@ def rename_files(
     input_path = Path(input_dir)
     empty_dir = input_path / "empty"
 
-    for image_path in input_path.glob("*.*"):
+    for image_path in input_path.rglob("*.*"):
         if not _is_image_file(image_path):
             continue
 
         label_path = None
         for ext in (".txt", ".json"):
-            if (input_path / f"{image_path.stem}{ext}").exists():
-                label_path = input_path / f"{image_path.stem}{ext}"
+            test_path = image_path.with_suffix(ext)
+            if test_path.is_file():
+                label_path = test_path
                 break
 
-        if not label_path.is_file():
+        if not label_path:
             print(f"⚠️  No label file found for {image_path.name}, skipping.")
             continue
 
@@ -155,7 +156,7 @@ def undo_rename(input_dir: str, *, dry_run: bool = False) -> None:
         dry_run: If True, print the changes without renaming files.
     """
     input_path = Path(input_dir)
-    for image_path in input_path.glob("*--*.*"):
+    for image_path in input_path.rglob("*--*.*"):
         if image_path.stem.count("--") != 1:
             continue
 
@@ -167,10 +168,9 @@ def undo_rename(input_dir: str, *, dry_run: bool = False) -> None:
 
         label_path = None
         for ext in (".txt", ".json"):
-            # The label file would have been renamed to match the image file (without the image extension)
-            potential_label_name = f"{image_path.stem}{ext}"
-            if (input_path / potential_label_name).exists():
-                label_path = input_path / potential_label_name
+            test_path = image_path.with_suffix(ext)
+            if test_path.is_file():
+                label_path = test_path
                 break
 
         if not label_path:
