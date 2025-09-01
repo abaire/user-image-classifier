@@ -117,6 +117,7 @@ class ImageClassifierGUI:
         self.strip_confidence = strip_confidence
         self.yolo = yolo
         self.class_to_id = {name: i for i, name in enumerate(sorted(self.key_map.values()))}
+        self.id_to_class = {i: name for name, i in self.class_to_id.items()}
         self.colors = [
             "red",
             "green",
@@ -310,6 +311,20 @@ class ImageClassifierGUI:
 
         self._redraw_canvas(new_img_x, new_img_y)
 
+    def _load_existing_metadata(self):
+        image_path = Path(self.current_path)
+        base_filename = image_path.stem
+        parent_dir = image_path.parent
+
+        json_path = parent_dir / f"{base_filename}.json"
+        if json_path.exists():
+            self._load_json_metadata(json_path)
+            return
+
+        yolo_path = parent_dir / f"{base_filename}.txt"
+        if yolo_path.exists():
+            self._load_yolo_metadata(yolo_path)
+
     def display_image(self):
         """Loads and displays the next image in the queue."""
         self.bboxes = []
@@ -327,6 +342,8 @@ class ImageClassifierGUI:
 
         self.original_image = Image.open(self.current_path)
         self.image_width, self.image_height = self.original_image.size
+
+        self._load_existing_metadata()
 
         screen_width = self.root.winfo_screenwidth() * 0.8
         screen_height = self.root.winfo_screenheight() * 0.8
@@ -390,6 +407,45 @@ class ImageClassifierGUI:
 
         self.display_image()
 
+    def _load_yolo_metadata(self, yolo_path: Path):
+        with open(yolo_path) as f:
+            lines = f.readlines()
+
+        for line in lines:
+            parts = line.strip().split()
+            if not parts:
+                continue
+            class_id = int(parts[0])
+            x_center_norm = float(parts[1])
+            y_center_norm = float(parts[2])
+            width_norm = float(parts[3])
+            height_norm = float(parts[4])
+
+            x_center = x_center_norm * self.image_width
+            y_center = y_center_norm * self.image_height
+            half_box_width = width_norm * self.image_width * 0.5
+            half_box_height = height_norm * self.image_height * 0.5
+
+            x1 = x_center - half_box_width
+            y1 = y_center - half_box_height
+            x2 = x_center + half_box_width
+            y2 = y_center + half_box_height
+
+            label = self.id_to_class.get(class_id)
+            if label is None:
+                print(f"⚠️ Warning: Unknown class ID {class_id} in {yolo_path}")
+                continue
+
+            self.bboxes.append(
+                {
+                    "x1": x1,
+                    "y1": y1,
+                    "x2": x2,
+                    "y2": y2,
+                    "label": label,
+                }
+            )
+
     def _save_yolo_format(self, filename: str, output_dir: Path):
         txt_filename = os.path.splitext(filename)[0] + ".txt"
         dest_path = output_dir / txt_filename
@@ -420,6 +476,22 @@ class ImageClassifierGUI:
             print(f"✅ Saved empty: '{txt_filename}'")
         else:
             print(f"✅ Saved: '{txt_filename}'")
+
+    def _load_json_metadata(self, json_path: Path):
+        with open(json_path) as f:
+            data = json.load(f)
+
+        for label, bboxes in data.items():
+            for bbox in bboxes:
+                self.bboxes.append(
+                    {
+                        "x1": bbox["x1"],
+                        "y1": bbox["y1"],
+                        "x2": bbox["x2"],
+                        "y2": bbox["y2"],
+                        "label": label,
+                    }
+                )
 
     def _save_json_format(self, filename: str, output_dir: Path):
         json_filename = os.path.splitext(filename)[0] + ".json"
@@ -526,7 +598,7 @@ class ImageClassifierGUI:
         self._redraw_canvas(x, y)  # Redraw to show the new box scaled correctly
 
 
-def _find_sources(input_dirs: list[str]) -> set[str]:
+def _find_sources(input_dirs: list[str], *, edit: bool = False) -> set[str]:
     input_dirs = [Path(os.path.expanduser(input_dir)) for input_dir in input_dirs]
 
     combined_results = itertools.chain.from_iterable(base_path.rglob("*.*") for base_path in input_dirs)
@@ -542,12 +614,12 @@ def _find_sources(input_dirs: list[str]) -> set[str]:
         # Skip if a label file already exists
         base_filename = filename.stem
         parent_dir = filename.parent
-        if (parent_dir / f"{base_filename}.json").exists() or (parent_dir / f"{base_filename}.txt").exists():
-            return False
+        has_label = (parent_dir / f"{base_filename}.json").exists() or (parent_dir / f"{base_filename}.txt").exists()
+        if edit:
+            return has_label
+        return not has_label
 
-        return True
-
-    return {filename for filename in all_files if keep_file(filename)}
+    return {str(filename) for filename in all_files if keep_file(filename)}
 
 
 def _run_gui(
@@ -631,11 +703,16 @@ def main() -> int:
         action="store_true",
         help="Do not emit YOLOv8 format output, use the default JSON format instead.",
     )
+    parser.add_argument(
+        "--edit",
+        action="store_true",
+        help="Edit existing classifications.",
+    )
     args = parser.parse_args()
 
     key_map = load_key_map(args.config)
 
-    image_paths = _find_sources(args.dirs)
+    image_paths = _find_sources(args.dirs, edit=args.edit)
     if not image_paths:
         print("No JPG images found in the specified directories. Exiting.")
         return 0

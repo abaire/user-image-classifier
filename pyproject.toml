@@ -76,6 +76,7 @@ extra-dependencies = [
 pythonpath = ["src"]
 
 [tool.hatch.envs.hatch-test]
+type = "virtual"
 extra-dependencies = [
     "pytest",
     "coverage",
