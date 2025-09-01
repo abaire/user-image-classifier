@@ -81,6 +81,8 @@ _MOUSE_WHEEL_DELTA = 120
 _MOUSE_BUTTON_4 = 4
 _MOUSE_BUTTON_5 = 5
 
+_MAX_UNDO_FILES = 16
+
 
 class ImageClassifierGUI:
     """
@@ -177,6 +179,7 @@ class ImageClassifierGUI:
         self.is_drawing = False
         self.crosshair_v = None
         self.crosshair_h = None
+        self.undo_stack = []
 
         self.canvas.bind("<ButtonPress-1>", self.on_button_press)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
@@ -364,7 +367,10 @@ class ImageClassifierGUI:
         if key == "escape":
             self.root.destroy()
         elif key == "backspace":
-            self.undo_last_bbox()
+            if self.bboxes:
+                self.undo_last_bbox()
+            else:
+                self.undo_last_save()
         elif key == "right":
             if event.state & 0x0001:  # Shift key
                 self.canvas.xview_scroll(1, "units")
@@ -525,6 +531,10 @@ class ImageClassifierGUI:
     def save_and_next(self):
         """Saves the bounding boxes and moves to the next image."""
         source_path = Path(self.image_paths.pop(self.current_index))
+        self.undo_stack.append(source_path)
+        if len(self.undo_stack) > _MAX_UNDO_FILES:
+            self.undo_stack.pop(0)
+
         filename = source_path.name
         output_dir = source_path.parent
 
@@ -557,6 +567,17 @@ class ImageClassifierGUI:
         x, y = self.canvas.coords(self.image_on_canvas)
         self._redraw_canvas(x, y)
         print("↩️ UNDO: Removed last bounding box.")
+
+    def undo_last_save(self):
+        """Undoes the last save operation."""
+        if not self.undo_stack:
+            print("❗️ No save to undo.")
+            return
+
+        last_saved_path = str(self.undo_stack.pop())
+        self.image_paths.insert(self.current_index, last_saved_path)
+        self.display_image()
+        print(f"↩️ UNDO: Reopened '{os.path.basename(last_saved_path)}'")
 
     def on_button_press(self, event):
         if self.bboxes and self.bboxes[-1]["label"] is None:
