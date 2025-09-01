@@ -36,6 +36,7 @@ Source = "https://github.com/abaire/user-image-classifier"
 [project.scripts]
 imgclassifier = "user_image_classifier:run"
 imgclassify-rename = "user_image_classifier.renamer_cli:main"
+imgclassify-cleanup = "user_image_classifier.cleanup_cli:main"
 
 [tool.hatch.version]
 path = "src/user_image_classifier/__about__.py"
