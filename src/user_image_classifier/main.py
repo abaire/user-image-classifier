@@ -749,7 +749,7 @@ def main() -> int:
         help="Use the secondary confidence score (if present) for confidence thresholding.",
     )
     parser.add_argument(
-        "--no-yolo",
+        "--yolo",
         action="store_true",
         help="Do not emit YOLOv8 format output, use the default JSON format instead.",
     )
@@ -783,7 +783,7 @@ def main() -> int:
         max_confidence_threshold=args.max_confidence_threshold,
         strip_confidence=args.strip_confidence,
         use_secondary_confidence=args.use_secondary_confidence,
-        yolo=not args.no_yolo,
+        yolo=not args.yolo,
     )
     return 0
 
