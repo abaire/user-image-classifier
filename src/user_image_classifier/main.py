@@ -6,7 +6,6 @@ import itertools
 import json
 import os
 import re
-import shutil
 import sys
 import tkinter as tk
 from pathlib import Path
@@ -58,7 +57,7 @@ class ImageClassifierGUI:
         self.class_to_id = {name: i for i, name in enumerate(sorted(self.key_map.values()))}
         self.id_to_class = {i: name for name, i in self.class_to_id.items()}
         self.colors = [
-            "red",
+            "firebrick1",
             "green",
             "light sky blue",
             "yellow",
@@ -69,9 +68,11 @@ class ImageClassifierGUI:
             "light slate blue",
             "gold",
             "orchid",
-            "deep pink",
+            "thistle2",
             "MediumPurple1",
             "OliveDrab1",
+            "cyan3",
+            "bisque",
         ]
 
         self.root.title("Image Classifier")
@@ -438,7 +439,7 @@ class ImageClassifierGUI:
             new_name = re.sub(r"__\d+[a-zA-Z_]+", "", name)
             output_filename = new_name + ext
 
-            shutil.copy(source_path, output_dir / output_filename)
+            source_path.rename(output_dir / output_filename)
             self._save_json_format(output_filename, output_dir)
         else:
             output_dir = source_path.parent
