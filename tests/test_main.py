@@ -2,7 +2,6 @@ from __future__ import annotations
 
 # ruff: noqa: SLF001 Private member accessed
 import json
-import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -387,51 +386,3 @@ def test_drawing_state_and_crosshair(mock_gui):
     # Release button
     gui.on_button_release(mock_event)
     assert not gui.is_drawing
-
-
-@pytest.mark.parametrize(
-    ("min_confidence", "max_confidence", "use_secondary", "expected_images"),
-    [
-        (None, None, False, ["C50_a.jpg", "C80_fox_C20_bear_b.jpg", "c.jpg"]),
-        (60, None, False, ["C80_fox_C20_bear_b.jpg", "c.jpg"]),
-        (None, 60, False, ["C50_a.jpg", "c.jpg"]),
-        (None, None, True, ["C50_a.jpg", "C80_fox_C20_bear_b.jpg", "c.jpg"]),
-        (10, 30, True, ["C50_a.jpg", "C80_fox_C20_bear_b.jpg", "c.jpg"]),
-        (90, None, True, ["C50_a.jpg", "c.jpg"]),
-    ],
-)
-def test_confidence_filtering(tmp_path: Path, min_confidence, max_confidence, use_secondary, expected_images):
-    image_dir = tmp_path / "images"
-    image_dir.mkdir()
-    output_root = tmp_path / "output"
-    output_root.mkdir()
-
-    image_paths = set()
-    for filename in ["C50_a.jpg", "C80_fox_C20_bear_b.jpg", "c.jpg"]:
-        p = image_dir / filename
-        p.touch()
-        image_paths.add(str(p))
-
-    with patch("tkinter.Tk"), patch("tkinter.Label"), patch("PIL.ImageTk.PhotoImage"), patch(
-        "PIL.Image.open"
-    ) as mock_open:
-        mock_image = MagicMock()
-        mock_image.size = (100, 100)
-        mock_image.resize.return_value = mock_image
-        mock_open.return_value = mock_image
-
-        root = MagicMock()
-        root.winfo_screenwidth.return_value = 800
-        root.winfo_screenheight.return_value = 600
-
-        gui = ImageClassifierGUI(
-            root,
-            image_paths,
-            {},
-            min_confidence_threshold=min_confidence,
-            max_confidence_threshold=max_confidence,
-            use_secondary_confidence=use_secondary,
-        )
-
-        assert len(gui.image_paths) == len(expected_images)
-        assert {os.path.basename(p) for p in gui.image_paths} == set(expected_images)

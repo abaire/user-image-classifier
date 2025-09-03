@@ -5,7 +5,6 @@ import argparse
 import itertools
 import json
 import os
-import re
 import shutil
 import sys
 import tkinter as tk
@@ -15,66 +14,6 @@ from tkinter import messagebox
 from PIL import Image, ImageTk
 
 from user_image_classifier.config import load_key_map
-
-CONFIDENCE_SUBSTRING = r"C(\d+)"
-CLASS_SUBSTRING = r"([a-zA-Z_-]+)"
-
-MULTICLASS_PREFIX_RE = re.compile(
-    f"^{CONFIDENCE_SUBSTRING}_{CLASS_SUBSTRING}_{CONFIDENCE_SUBSTRING}_{CLASS_SUBSTRING}_(.*)"
-)
-SINGLECLASS_PREFIX_RE = re.compile(f"^{CONFIDENCE_SUBSTRING}_(.*)")
-MULTICLASS_SUFFIX_RE = re.compile(
-    rf"(.*?)_{CONFIDENCE_SUBSTRING}_{CLASS_SUBSTRING}_{CONFIDENCE_SUBSTRING}_{CLASS_SUBSTRING}(\..*)?$"
-)
-SINGLECLASS_SUFFIX_RE = re.compile(rf"(.+?)_{CONFIDENCE_SUBSTRING}(\..*)?$")
-
-
-def _remove_confidence_substring(filename: str) -> str:
-    match = MULTICLASS_PREFIX_RE.match(filename)
-    if match:
-        return match.group(5)
-
-    match = SINGLECLASS_PREFIX_RE.match(filename)
-    if match:
-        return match.group(2)
-
-    match = MULTICLASS_SUFFIX_RE.match(filename)
-    if match:
-        return f"{match.group(1)}{match.group(6) or ''}"
-
-    match = SINGLECLASS_SUFFIX_RE.match(filename)
-    if match:
-        return f"{match.group(1)}{match.group(3) or ''}"
-
-    return filename
-
-
-def _get_confidences(filename: str) -> tuple[int | None, int | None]:
-    match = MULTICLASS_PREFIX_RE.match(filename)
-    if match:
-        return int(match.group(1)), int(match.group(3))
-
-    match = SINGLECLASS_PREFIX_RE.match(filename)
-    if match:
-        return int(match.group(1)), None
-
-    match = MULTICLASS_SUFFIX_RE.match(filename)
-    if match:
-        return int(match.group(2)), int(match.group(4))
-
-    match = SINGLECLASS_SUFFIX_RE.match(filename)
-    if match:
-        return int(match.group(2)), None
-
-    return None, None
-
-
-def _get_confidence(filename: str, *, use_secondary: bool = False) -> int | None:
-    primary, secondary = _get_confidences(filename)
-    if use_secondary:
-        return secondary
-    return primary
-
 
 _ZOOM_OUT_SCALE = 0.9
 _ZOOM_IN_SCALE = 1.1
@@ -95,11 +34,7 @@ class ImageClassifierGUI:
         root: tk.Tk,
         image_paths: set[str],
         key_map: dict[str, str],
-        min_confidence_threshold: int | None = None,
-        max_confidence_threshold: int | None = None,
         *,
-        strip_confidence: bool = False,
-        use_secondary_confidence: bool = False,
         fixup_output_dir: Path | None = None,
     ):
         """
@@ -110,14 +45,11 @@ class ImageClassifierGUI:
             image_paths: A set of absolute paths to the images to be classified.
             key_map: A dictionary mapping keyboard keys to directory names.
             output_root: Directory into which classified files should be placed.
-            strip_confidence: If True, strip "Cxx" confidence prefix/suffix from filenames.
-            use_secondary_confidence: If True, use the secondary confidence score for filtering.
             fixup_output_dir: If provided, copy images and metadata to this directory.
         """
         self.root = root
         self.image_paths = sorted(image_paths)
         self.key_map = key_map
-        self.strip_confidence = strip_confidence
         self.output_dir = fixup_output_dir
         self.class_to_id = {name: i for i, name in enumerate(sorted(self.key_map.values()))}
         self.id_to_class = {i: name for name, i in self.class_to_id.items()}
@@ -139,19 +71,6 @@ class ImageClassifierGUI:
         ]
 
         self.root.title("Image Classifier")
-
-        if min_confidence_threshold is not None or max_confidence_threshold is not None:
-            min_thresh = min_confidence_threshold if min_confidence_threshold is not None else 0
-            max_thresh = max_confidence_threshold if max_confidence_threshold is not None else 100
-
-            def _keep_filename(filename: str) -> bool:
-                confidence = _get_confidence(os.path.basename(filename), use_secondary=use_secondary_confidence)
-                if confidence is None:
-                    return True
-
-                return min_thresh <= confidence <= max_thresh
-
-            self.image_paths = list(filter(_keep_filename, self.image_paths))
 
         banner_text = " | ".join([f"'{key}': {folder}" for key, folder in self.key_map.items()])
         banner_text += (
@@ -603,11 +522,7 @@ def _find_sources(input_dirs: list[str], *, edit: bool = False) -> set[str]:
 def _run_gui(
     image_paths: set[str],
     key_map: dict[str, str],
-    min_confidence_threshold: int | None,
-    max_confidence_threshold: int | None,
     *,
-    strip_confidence: bool = False,
-    use_secondary_confidence: bool = False,
     fixup_output_dir: Path | None = None,
 ):
     root = tk.Tk()
@@ -615,10 +530,6 @@ def _run_gui(
         root,
         image_paths,
         key_map,
-        min_confidence_threshold=min_confidence_threshold,
-        max_confidence_threshold=max_confidence_threshold,
-        strip_confidence=strip_confidence,
-        use_secondary_confidence=use_secondary_confidence,
         fixup_output_dir=fixup_output_dir,
     )
     root.update_idletasks()
@@ -647,32 +558,6 @@ def main() -> int:
         "dirs",
         nargs="+",
         help="One or more source directories to search for JPGs recursively.",
-    )
-    parser.add_argument(
-        "--strip-confidence",
-        "-S",
-        action="store_true",
-        help="Strip Cxx prefix/suffix from filenames with confidence scores.",
-    )
-    parser.add_argument(
-        "--min-confidence-threshold",
-        "-T",
-        type=int,
-        metavar="confidence_percent",
-        help="Skip files with confidence less than <confidence_percent>",
-    )
-    parser.add_argument(
-        "--max-confidence-threshold",
-        "-X",
-        type=int,
-        metavar="confidence_percent",
-        help="Skip files with confidence greater than <confidence_percent>",
-    )
-    parser.add_argument(
-        "--use-secondary-confidence",
-        "-U",
-        action="store_true",
-        help="Use the secondary confidence score (if present) for confidence thresholding.",
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -706,10 +591,6 @@ def main() -> int:
     _run_gui(
         image_paths,
         key_map,
-        min_confidence_threshold=args.min_confidence_threshold,
-        max_confidence_threshold=args.max_confidence_threshold,
-        strip_confidence=args.strip_confidence,
-        use_secondary_confidence=args.use_secondary_confidence,
         fixup_output_dir=Path(args.fixup) if args.fixup else None,
     )
     return 0
