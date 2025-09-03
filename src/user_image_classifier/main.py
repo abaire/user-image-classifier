@@ -6,10 +6,16 @@ import itertools
 import json
 import os
 import re
+import shutil
 import sys
+import tempfile
 import tkinter as tk
+from abc import ABC, abstractmethod
+from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox
+from typing import Any
 
 from PIL import Image, ImageTk
 
@@ -22,6 +28,149 @@ _MOUSE_BUTTON_4 = 4
 _MOUSE_BUTTON_5 = 5
 
 _MAX_UNDO_FILES = 16
+
+
+class PendingDeletions:
+    """Manages files that are pending hard deletion."""
+
+    def __init__(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.files_to_delete = set()
+
+    def add(self, path: Path):
+        """Adds a file to the list of pending deletions."""
+        self.files_to_delete.add(path)
+
+    def clear(self):
+        """Deletes all pending files."""
+        for path in self.files_to_delete:
+            path.unlink(missing_ok=True)
+        self.files_to_delete.clear()
+        self.temp_dir.cleanup()
+
+    def __del__(self):
+        self.clear()
+
+
+class UndoableAction(ABC):
+    description: str = ""
+
+    @abstractmethod
+    def undo(self, gui: ImageClassifierGUI) -> None: ...
+
+    def finalize(self, gui: ImageClassifierGUI) -> None:
+        """Finalizes the action. By default, do nothing."""
+
+
+@dataclass
+class AddBoundingBoxAction(UndoableAction):
+    bbox: dict[str, Any]
+
+    def __post_init__(self):
+        self.description = "add bounding box"
+
+    def undo(self, gui: ImageClassifierGUI) -> None:
+        gui.bboxes.remove(self.bbox)
+        gui.redraw_canvas_on_undo()
+
+
+@dataclass
+class DeleteBoundingBoxAction(UndoableAction):
+    bbox: dict[str, Any]
+    index: int
+
+    def __post_init__(self):
+        self.description = "delete bounding box"
+
+    def undo(self, gui: ImageClassifierGUI) -> None:
+        gui.bboxes.insert(self.index, self.bbox)
+        gui.redraw_canvas_on_undo()
+
+
+@dataclass
+class AddLabelAction(UndoableAction):
+    bbox: dict[str, Any]
+    old_label: str | None
+
+    def __post_init__(self):
+        self.description = "add label"
+
+    def undo(self, gui: ImageClassifierGUI) -> None:
+        self.bbox["label"] = self.old_label
+        gui.redraw_canvas_on_undo()
+
+
+@dataclass
+class SaveFileAction(UndoableAction):
+    source_path: Path
+    dest_path: Path
+
+    def __post_init__(self):
+        self.description = "save file"
+
+    def undo(self, gui: ImageClassifierGUI) -> None:
+        shutil.move(self.dest_path, self.source_path)
+        gui.image_paths.insert(gui.current_index, str(self.source_path))
+        gui.display_image()
+
+
+@dataclass
+class DeleteFileAction(UndoableAction):
+    original_path: Path
+    renamed_path: Path
+    original_json_path: Path | None
+    renamed_json_path: Path | None
+    is_hard_delete: bool = False
+
+    def __post_init__(self):
+        self.description = "hard delete file" if self.is_hard_delete else "soft delete file"
+
+    def undo(self, gui: ImageClassifierGUI) -> None:
+        shutil.move(self.renamed_path, self.original_path)
+        if self.renamed_json_path and self.original_json_path:
+            shutil.move(self.renamed_json_path, self.original_json_path)
+        gui.image_paths.insert(gui.current_index, str(self.original_path))
+        gui.display_image()
+
+    def finalize(self, gui: ImageClassifierGUI) -> None:
+        """Permanently deletes the file if it was a hard delete."""
+        if self.is_hard_delete:
+            print(f"🔥 Scheduling final deletion of {self.original_path.name}")
+            gui.pending_deletions.add(self.renamed_path)
+            if self.renamed_json_path:
+                gui.pending_deletions.add(self.renamed_json_path)
+
+
+class UndoManager:
+    """Manages an undo stack for user actions."""
+
+    def __init__(self, gui: ImageClassifierGUI, max_size: int = 20):
+        self.gui = gui
+        self.stack = deque(maxlen=max_size)
+
+    def register_action(self, action):
+        """Registers an undoable action."""
+        if len(self.stack) == self.stack.maxlen:
+            self.stack[0].finalize(self.gui)
+        self.stack.append(action)
+
+    def undo(self, gui):
+        """Undoes the last action."""
+        if not self.stack:
+            print("❗️ No action to undo.")
+            return
+
+        action = self.stack.pop()
+        action.undo(gui)
+        print(f"↩️ UNDO: {action.description}")
+
+    def clear(self):
+        """Clears the undo stack."""
+        self.stack.clear()
+
+    def is_empty(self) -> bool:
+        """Returns True if the undo stack is empty."""
+        return not self.stack
 
 
 class ImageClassifierGUI:
@@ -104,7 +253,9 @@ class ImageClassifierGUI:
         self.is_drawing = False
         self.crosshair_v = None
         self.crosshair_h = None
-        self.undo_stack = []
+        self.bbox_undo_manager = UndoManager(self)
+        self.file_undo_manager = UndoManager(self)
+        self.pending_deletions = PendingDeletions()
         self._undo_clears_all_bounding_boxes = False
         self.selected_bbox_index = None
 
@@ -119,15 +270,21 @@ class ImageClassifierGUI:
         self.canvas.bind("<Button-5>", self.zoom)
         self.canvas.bind("<Motion>", self.handle_mouse_move)
         self.canvas.bind("<Leave>", self.handle_mouse_leave)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self.display_image()
+
+    def on_closing(self):
+        """Handles the window closing event."""
+        self.pending_deletions.clear()
+        self.root.destroy()
 
     def handle_right_click(self, event):
         del event
         if self.is_drawing:
             return
         if not self.delete_selected_bbox():
-            self.undo_last_bbox()
+            self.bbox_undo_manager.undo(self)
 
     def _delete_crosshair(self):
         if self.crosshair_v:
@@ -268,8 +425,13 @@ class ImageClassifierGUI:
             self._load_json_metadata(json_path)
             return
 
+    def redraw_canvas_on_undo(self):
+        x, y = self.canvas.coords(self.image_on_canvas)
+        self._redraw_canvas(x, y)
+
     def display_image(self):
         """Loads and displays the next image in the queue."""
+        self.bbox_undo_manager.clear()
         self.bboxes = []
         self.canvas.delete("all")
         self.zoom_level = 1.0
@@ -307,7 +469,7 @@ class ImageClassifierGUI:
         key = event.keysym.lower()
 
         if key == "escape":
-            self.root.destroy()
+            self.on_closing()
         elif key in ("f5", "f6"):
             if key == "f5":
                 self.cycle_bbox_selection(1)
@@ -316,11 +478,10 @@ class ImageClassifierGUI:
         elif key == "backspace":
             if self.is_drawing:
                 return
-            if not self.delete_selected_bbox():
-                if self.bboxes:
-                    self.undo_last_bbox()
-                else:
-                    self.undo_last_save()
+            if not self.bbox_undo_manager.is_empty():
+                self.bbox_undo_manager.undo(self)
+            else:
+                self.file_undo_manager.undo(self)
         elif key == "right":
             if event.state & 0x0001:  # Shift key
                 self.canvas.xview_scroll(1, "units")
@@ -425,9 +586,6 @@ class ImageClassifierGUI:
     def save_and_next(self):
         """Saves the bounding boxes and moves to the next image."""
         source_path = Path(self.image_paths.pop(self.current_index))
-        self.undo_stack.append(source_path)
-        if len(self.undo_stack) > _MAX_UNDO_FILES:
-            self.undo_stack.pop(0)
 
         filename = source_path.name
         if self.output_dir:
@@ -439,7 +597,9 @@ class ImageClassifierGUI:
             new_name = re.sub(r"__\d+[a-zA-Z_]+", "", name)
             output_filename = new_name + ext
 
-            source_path.rename(output_dir / output_filename)
+            dest_path = output_dir / output_filename
+            shutil.move(source_path, dest_path)
+            self.file_undo_manager.register_action(SaveFileAction(source_path, dest_path))
             self._save_json_format(output_filename, output_dir)
         else:
             output_dir = source_path.parent
@@ -451,55 +611,37 @@ class ImageClassifierGUI:
         if not self.bboxes:
             return
 
+        bbox_to_label = None
         if self.selected_bbox_index is not None:
-            self.bboxes[self.selected_bbox_index]["label"] = self.key_map[key]
+            bbox_to_label = self.bboxes[self.selected_bbox_index]
             self.selected_bbox_index = None
         else:
             # Find the last unlabeled bbox
             for bbox in reversed(self.bboxes):
                 if bbox["label"] is None:
-                    bbox["label"] = self.key_map[key]
+                    bbox_to_label = bbox
                     break
-        x, y = self.canvas.coords(self.image_on_canvas)
-        self._redraw_canvas(x, y)
 
-    def undo_last_bbox(self):
-        """Undoes the last bounding box."""
-        if not self.bboxes:
-            print("❗️ No bounding box to undo.")
-            return
-
-        if self._undo_clears_all_bounding_boxes:
-            self._undo_clears_all_bounding_boxes = False
-            self.bboxes.clear()
-        else:
-            self.bboxes.pop()
+        if bbox_to_label:
+            old_label = bbox_to_label["label"]
+            bbox_to_label["label"] = self.key_map[key]
+            self.bbox_undo_manager.register_action(AddLabelAction(bbox_to_label, old_label))
 
         x, y = self.canvas.coords(self.image_on_canvas)
         self._redraw_canvas(x, y)
-        print("↩️ UNDO: Removed last bounding box.")
 
     def delete_selected_bbox(self) -> bool:
         """Deletes the selected bounding box."""
         if self.selected_bbox_index is None:
             return False
 
+        bbox_to_delete = self.bboxes[self.selected_bbox_index]
+        self.bbox_undo_manager.register_action(DeleteBoundingBoxAction(bbox_to_delete, self.selected_bbox_index))
         del self.bboxes[self.selected_bbox_index]
         self.selected_bbox_index = None
         x, y = self.canvas.coords(self.image_on_canvas)
         self._redraw_canvas(x, y)
         return True
-
-    def undo_last_save(self):
-        """Undoes the last save operation."""
-        if not self.undo_stack:
-            print("❗️ No save to undo.")
-            return
-
-        last_saved_path = str(self.undo_stack.pop())
-        self.image_paths.insert(self.current_index, last_saved_path)
-        self.display_image()
-        print(f"↩️ UNDO: Reopened '{os.path.basename(last_saved_path)}'")
 
     def handle_delete_key(self):
         """Handles the delete key press for soft or hard deletion of an image."""
@@ -508,30 +650,59 @@ class ImageClassifierGUI:
 
         image_path = Path(self.image_paths.pop(self.current_index))
         json_path = image_path.with_suffix(".json")
+        json_exists = json_path.exists()
 
         if self.really_delete:
-            print(f"🔥 Deleting {image_path.name}")
-            image_path.unlink()
-            if json_path.exists():
-                print(f"🔥 Deleting {json_path.name}")
-                json_path.unlink(missing_ok=True)
+            # Hard delete: move to temp dir and register undo action
+            temp_dir = self.pending_deletions.temp_dir.name
+
+            new_image_path = Path(temp_dir) / image_path.name
+            print(f"🔥 Moving {image_path.name} to temp dir for deletion.")
+            shutil.move(image_path, new_image_path)
+
+            new_json_path = None
+            if json_exists:
+                new_json_path = Path(temp_dir) / json_path.name
+                print(f"🔥 Moving {json_path.name} to temp dir for deletion.")
+                shutil.move(json_path, new_json_path)
+
+            action = DeleteFileAction(
+                original_path=image_path,
+                renamed_path=new_image_path,
+                original_json_path=json_path if json_exists else None,
+                renamed_json_path=new_json_path,
+                is_hard_delete=True,
+            )
+            self.file_undo_manager.register_action(action)
+
         else:
+            # Soft delete (rename)
             new_image_name = f"_DELETE__{image_path.name}"
             new_image_path = image_path.with_name(new_image_name)
             print(f"🗑️  Renaming to {new_image_name}")
-            image_path.rename(new_image_path)
+            shutil.move(image_path, new_image_path)
 
-            if json_path.exists():
+            new_json_path = None
+            if json_exists:
                 new_json_name = f"_DELETE__{json_path.name}"
                 new_json_path = json_path.with_name(new_json_name)
                 print(f"🗑️  Renaming to {new_json_name}")
-                json_path.rename(new_json_path)
+                shutil.move(json_path, new_json_path)
+
+            action = DeleteFileAction(
+                original_path=image_path,
+                renamed_path=new_image_path,
+                original_json_path=json_path if json_exists else None,
+                renamed_json_path=new_json_path,
+                is_hard_delete=False,
+            )
+            self.file_undo_manager.register_action(action)
 
         self._update_after_removal()
 
     def on_button_press(self, event):
         if self.bboxes and self.bboxes[-1]["label"] is None:
-            self.undo_last_bbox()
+            self.bbox_undo_manager.undo(self)
 
         self.is_drawing = True
         self._delete_crosshair()
@@ -587,6 +758,7 @@ class ImageClassifierGUI:
             return
 
         self.bboxes.append(bbox)
+        self.bbox_undo_manager.register_action(AddBoundingBoxAction(bbox))
         x, y = self.canvas.coords(self.image_on_canvas)
         self._redraw_canvas(x, y)  # Redraw to show the new box scaled correctly
 
