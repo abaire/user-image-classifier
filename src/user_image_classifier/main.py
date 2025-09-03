@@ -5,6 +5,7 @@ import argparse
 import itertools
 import json
 import os
+import re
 import shutil
 import sys
 import tkinter as tk
@@ -36,6 +37,7 @@ class ImageClassifierGUI:
         key_map: dict[str, str],
         *,
         fixup_output_dir: Path | None = None,
+        really_delete: bool = False,
     ):
         """
         Initializes the classifier GUI.
@@ -46,11 +48,13 @@ class ImageClassifierGUI:
             key_map: A dictionary mapping keyboard keys to directory names.
             output_root: Directory into which classified files should be placed.
             fixup_output_dir: If provided, copy images and metadata to this directory.
+            really_delete: If True, permanently delete files.
         """
         self.root = root
         self.image_paths = sorted(image_paths)
         self.key_map = key_map
         self.output_dir = fixup_output_dir
+        self.really_delete = really_delete
         self.class_to_id = {name: i for i, name in enumerate(sorted(self.key_map.values()))}
         self.id_to_class = {i: name for name, i in self.class_to_id.items()}
         self.colors = [
@@ -184,14 +188,23 @@ class ImageClassifierGUI:
             bbox["rect"] = self.canvas.create_rectangle(x1, y1, x2, y2, outline=color, width=2, tags="bbox")
 
             if bbox["label"]:
+                # Adjust label position if the box is near the top of the image
+                font_size = 16
+                y_offset = 5
+                label_y = y1 - y_offset
+                anchor = tk.SW
+                if y1 < (font_size + y_offset):
+                    label_y = y2 + y_offset
+                    anchor = tk.NW
+
                 label_item = self.canvas.create_text(
                     x1,
-                    y1 - 5,
+                    label_y,
                     text=bbox["label"],
                     fill=color,
-                    anchor=tk.SW,
+                    anchor=anchor,
                     tags="bbox",
-                    font=("Helvetica", 16),
+                    font=("Helvetica", font_size),
                 )
                 bbox["label_item"] = label_item
                 text_bbox = self.canvas.bbox(label_item)
@@ -312,6 +325,8 @@ class ImageClassifierGUI:
         elif key == "equals" or event.char == "=":
             self.zoom_level = 1.0
             self._redraw_canvas(0, 0)
+        elif key == "delete":
+            self.handle_delete_key()
         elif key == "space":
             self.save_and_next()
         elif event.char.lower() in self.key_map:
@@ -386,11 +401,17 @@ class ImageClassifierGUI:
         if self.output_dir:
             output_dir = self.output_dir
             output_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy(source_path, output_dir / filename)
+
+            # Strip the __<object_count><class_name> suffixes from the filename
+            name, ext = os.path.splitext(filename)
+            new_name = re.sub(r"__\d+[a-zA-Z_]+", "", name)
+            output_filename = new_name + ext
+
+            shutil.copy(source_path, output_dir / output_filename)
+            self._save_json_format(output_filename, output_dir)
         else:
             output_dir = source_path.parent
-
-        self._save_json_format(filename, output_dir)
+            self._save_json_format(filename, output_dir)
 
         self._update_after_removal()
 
@@ -432,6 +453,34 @@ class ImageClassifierGUI:
         self.image_paths.insert(self.current_index, last_saved_path)
         self.display_image()
         print(f"↩️ UNDO: Reopened '{os.path.basename(last_saved_path)}'")
+
+    def handle_delete_key(self):
+        """Handles the delete key press for soft or hard deletion of an image."""
+        if not self.image_paths:
+            return
+
+        image_path = Path(self.image_paths.pop(self.current_index))
+        json_path = image_path.with_suffix(".json")
+
+        if self.really_delete:
+            print(f"🔥 Deleting {image_path.name}")
+            image_path.unlink()
+            if json_path.exists():
+                print(f"🔥 Deleting {json_path.name}")
+                json_path.unlink(missing_ok=True)
+        else:
+            new_image_name = f"_DELETE__{image_path.name}"
+            new_image_path = image_path.with_name(new_image_name)
+            print(f"🗑️  Renaming to {new_image_name}")
+            image_path.rename(new_image_path)
+
+            if json_path.exists():
+                new_json_name = f"_DELETE__{json_path.name}"
+                new_json_path = json_path.with_name(new_json_name)
+                print(f"🗑️  Renaming to {new_json_name}")
+                json_path.rename(new_json_path)
+
+        self._update_after_removal()
 
     def on_button_press(self, event):
         if self.bboxes and self.bboxes[-1]["label"] is None:
@@ -524,6 +573,7 @@ def _run_gui(
     key_map: dict[str, str],
     *,
     fixup_output_dir: Path | None = None,
+    really_delete: bool = False,
 ):
     root = tk.Tk()
     ImageClassifierGUI(
@@ -531,6 +581,7 @@ def _run_gui(
         image_paths,
         key_map,
         fixup_output_dir=fixup_output_dir,
+        really_delete=really_delete,
     )
     root.update_idletasks()
 
@@ -570,6 +621,11 @@ def main() -> int:
         metavar="OUTPUT_DIR",
         help="Edit existing classifications and save to a new directory. Incompatible with --edit.",
     )
+    parser.add_argument(
+        "--really-delete",
+        action="store_true",
+        help="Permanently delete files when the Delete key is pressed.",
+    )
     args = parser.parse_args()
 
     key_map = load_key_map(args.config)
@@ -592,6 +648,7 @@ def main() -> int:
         image_paths,
         key_map,
         fixup_output_dir=Path(args.fixup) if args.fixup else None,
+        really_delete=args.really_delete,
     )
     return 0
 
