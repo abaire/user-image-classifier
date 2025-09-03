@@ -15,6 +15,10 @@ def create_dummy_image(path: Path, size: tuple[int, int] = (10, 10)):
     img = Image.new("RGB", size, color="red")
     img.save(path, "JPEG")
 
+    metadata = path.with_suffix(".json")
+    with open(metadata, "w") as outfile:
+        outfile.write("{}")
+
 
 def test_cleanup_images_dry_run(tmp_path: Path):
     """
@@ -39,8 +43,7 @@ def test_cleanup_images_dry_run(tmp_path: Path):
     deleted_files = cleanup_images([str(tmp_path)], dry_run=True)
 
     # 3. Assert results
-    assert len(deleted_files) == 1
-    assert str(image_path2) in deleted_files
+    assert deleted_files == 1
     assert image_path1.exists()
     assert image_path2.exists()
     assert image_path3.exists()
@@ -68,8 +71,7 @@ def test_cleanup_images_deletes_duplicates(tmp_path: Path):
     deleted_files = cleanup_images([str(tmp_path)], dry_run=False)
 
     # 3. Assert results
-    assert len(deleted_files) == 1
-    assert str(image_path2) in deleted_files
+    assert deleted_files == 1
     assert image_path1.exists()
     assert not image_path2.exists()
     assert image_path3.exists()

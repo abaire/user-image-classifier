@@ -24,13 +24,19 @@ def main() -> int:
         action="store_true",
         help="Print the changes without deleting files.",
     )
+    parser.add_argument(
+        "--golden-dir",
+        "-g",
+        nargs="+",
+        help="Directories containing images that must be kept. Duplicate images outside of this directory will be removed.",
+    )
 
     args = parser.parse_args()
 
-    deleted_files = cleanup_images(args.dirs, dry_run=args.dry_run)
+    deleted_files = cleanup_images(args.dirs, dry_run=args.dry_run, golden_dirs=args.golden_dir)
 
     if deleted_files:
-        print(f"\n{len(deleted_files)} duplicate files found.")
+        print(f"\n{deleted_files} duplicate files found.")
     else:
         print("No duplicate files found.")
 
