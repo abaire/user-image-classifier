@@ -716,10 +716,8 @@ def main() -> int:
     )
     parser.add_argument("-c", "--config", help="Path to the JSON configuration file for key mappings.")
     parser.add_argument(
-        "-d",
-        "--dirs",
+        "dirs",
         nargs="+",
-        required=True,
         help="One or more source directories to search for JPGs recursively.",
     )
     parser.add_argument(

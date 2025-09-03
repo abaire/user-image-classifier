@@ -15,10 +15,8 @@ def main() -> int:
         description="A utility to find and remove duplicate images.",
     )
     parser.add_argument(
-        "-d",
-        "--dirs",
+        "dirs",
         nargs="+",
-        required=True,
         help="One or more source directories to search for JPGs recursively.",
     )
     parser.add_argument(
