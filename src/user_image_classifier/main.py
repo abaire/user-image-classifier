@@ -80,7 +80,7 @@ class ImageClassifierGUI:
         banner_text += (
             "\nDraw boxes with mouse. Press key to label. Space: Save and Next. Backspace: Undo Box. ESC: Quit"
         )
-        banner_text += "\n+/-/=: Zoom | Shift+Arrows: Pan"
+        banner_text += "\n+/-/=: Zoom | Shift+Arrows: Pan | F5/F6: Cycle Boxes"
         self.banner_label = tk.Label(self.root, text=banner_text, font=("Helvetica", 14), pady=5)
         self.banner_label.pack()
 
@@ -105,6 +105,7 @@ class ImageClassifierGUI:
         self.crosshair_h = None
         self.undo_stack = []
         self._undo_clears_all_bounding_boxes = False
+        self.selected_bbox_index = None
 
         self.canvas.bind("<ButtonPress-1>", self.on_button_press)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
@@ -122,7 +123,10 @@ class ImageClassifierGUI:
 
     def handle_right_click(self, event):
         del event
-        self.undo_last_bbox()
+        if self.is_drawing:
+            return
+        if not self.delete_selected_bbox():
+            self.undo_last_bbox()
 
     def _delete_crosshair(self):
         if self.crosshair_v:
@@ -173,7 +177,7 @@ class ImageClassifierGUI:
         self.canvas.config(scrollregion=self.canvas.bbox("all"))
 
         # Redraw bboxes
-        for bbox in self.bboxes:
+        for i, bbox in enumerate(self.bboxes):
             x1 = x + bbox["x1"] * self.zoom_level
             y1 = y + bbox["y1"] * self.zoom_level
             x2 = x + bbox["x2"] * self.zoom_level
@@ -186,6 +190,11 @@ class ImageClassifierGUI:
 
             bbox["rect_bg"] = self.canvas.create_rectangle(x1, y1, x2, y2, outline="black", width=4, tags="bbox")
             bbox["rect"] = self.canvas.create_rectangle(x1, y1, x2, y2, outline=color, width=2, tags="bbox")
+
+            if i == self.selected_bbox_index:
+                self.canvas.create_rectangle(
+                    x1 + 2, y1 + 2, x2 - 2, y2 - 2, outline="white", width=2, dash=(4, 4), tags="bbox"
+                )
 
             if bbox["label"]:
                 # Adjust label position if the box is near the top of the image
@@ -263,6 +272,7 @@ class ImageClassifierGUI:
         self.bboxes = []
         self.canvas.delete("all")
         self.zoom_level = 1.0
+        self.selected_bbox_index = None
 
         if not self.image_paths:
             messagebox.showinfo("Done!", "All images have been classified.")
@@ -297,11 +307,19 @@ class ImageClassifierGUI:
 
         if key == "escape":
             self.root.destroy()
-        elif key == "backspace":
-            if self.bboxes:
-                self.undo_last_bbox()
+        elif key in ("f5", "f6"):
+            if key == "f5":
+                self.cycle_bbox_selection(1)
             else:
-                self.undo_last_save()
+                self.cycle_bbox_selection(-1)
+        elif key == "backspace":
+            if self.is_drawing:
+                return
+            if not self.delete_selected_bbox():
+                if self.bboxes:
+                    self.undo_last_bbox()
+                else:
+                    self.undo_last_save()
         elif key == "right":
             if event.state & 0x0001:  # Shift key
                 self.canvas.xview_scroll(1, "units")
@@ -339,6 +357,19 @@ class ImageClassifierGUI:
         new_index = (self.current_index + delta) % len(self.image_paths)
         self.current_index = new_index
         self.display_image()
+
+    def cycle_bbox_selection(self, delta: int):
+        """Cycles through the bounding box selection."""
+        if not self.bboxes:
+            return
+
+        if self.selected_bbox_index is None:
+            self.selected_bbox_index = 0 if delta > 0 else len(self.bboxes) - 1
+        else:
+            self.selected_bbox_index = (self.selected_bbox_index + delta) % len(self.bboxes)
+
+        x, y = self.canvas.coords(self.image_on_canvas)
+        self._redraw_canvas(x, y)
 
     def _update_after_removal(self):
         if self.image_paths and self.current_index >= len(self.image_paths):
@@ -419,13 +450,17 @@ class ImageClassifierGUI:
         if not self.bboxes:
             return
 
-        # Find the last unlabeled bbox
-        for bbox in reversed(self.bboxes):
-            if bbox["label"] is None:
-                bbox["label"] = self.key_map[key]
-                x, y = self.canvas.coords(self.image_on_canvas)
-                self._redraw_canvas(x, y)
-                break
+        if self.selected_bbox_index is not None:
+            self.bboxes[self.selected_bbox_index]["label"] = self.key_map[key]
+            self.selected_bbox_index = None
+        else:
+            # Find the last unlabeled bbox
+            for bbox in reversed(self.bboxes):
+                if bbox["label"] is None:
+                    bbox["label"] = self.key_map[key]
+                    break
+        x, y = self.canvas.coords(self.image_on_canvas)
+        self._redraw_canvas(x, y)
 
     def undo_last_bbox(self):
         """Undoes the last bounding box."""
@@ -442,6 +477,17 @@ class ImageClassifierGUI:
         x, y = self.canvas.coords(self.image_on_canvas)
         self._redraw_canvas(x, y)
         print("↩️ UNDO: Removed last bounding box.")
+
+    def delete_selected_bbox(self) -> bool:
+        """Deletes the selected bounding box."""
+        if self.selected_bbox_index is None:
+            return False
+
+        del self.bboxes[self.selected_bbox_index]
+        self.selected_bbox_index = None
+        x, y = self.canvas.coords(self.image_on_canvas)
+        self._redraw_canvas(x, y)
+        return True
 
     def undo_last_save(self):
         """Undoes the last save operation."""
