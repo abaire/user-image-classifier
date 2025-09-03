@@ -591,7 +591,7 @@ class ImageClassifierGUI:
         self._redraw_canvas(x, y)  # Redraw to show the new box scaled correctly
 
 
-def _find_sources(input_dirs: list[str], *, edit: bool = False) -> set[str]:
+def _find_sources(input_dirs: list[str], *, edit: bool = False, process_all: bool = False) -> set[str]:
     input_dirs = [Path(os.path.expanduser(input_dir)) for input_dir in input_dirs]
 
     combined_results = itertools.chain.from_iterable(base_path.rglob("*.*") for base_path in input_dirs)
@@ -603,6 +603,9 @@ def _find_sources(input_dirs: list[str], *, edit: bool = False) -> set[str]:
 
         if filename.suffix[1:].lower() not in {"jpg", "jpeg"}:
             return False
+
+        if process_all:
+            return True
 
         # Skip if a label file already exists
         base_filename = filename.stem
@@ -666,7 +669,10 @@ def main() -> int:
     group.add_argument(
         "--fixup",
         metavar="OUTPUT_DIR",
-        help="Edit existing classifications and save to a new directory. Incompatible with --edit.",
+        help="Edit existing classifications and save to a new directory.",
+    )
+    parser.add_argument(
+        "--process-all-images", "-A", action="store_true", help="Process images without metadata in edit/fixup mode."
     )
     parser.add_argument(
         "--really-delete",
@@ -677,7 +683,7 @@ def main() -> int:
 
     key_map = load_key_map(args.config)
 
-    image_paths = _find_sources(args.dirs, edit=args.edit or bool(args.fixup))
+    image_paths = _find_sources(args.dirs, edit=args.edit or args.fixup, process_all=args.process_all_images)
     if not image_paths:
         print("No JPG images found in the specified directories. Exiting.")
         return 0
