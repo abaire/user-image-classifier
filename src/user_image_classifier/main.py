@@ -6,6 +6,7 @@ import itertools
 import json
 import os
 import re
+import shutil
 import sys
 import tkinter as tk
 from pathlib import Path
@@ -99,7 +100,7 @@ class ImageClassifierGUI:
         *,
         strip_confidence: bool = False,
         use_secondary_confidence: bool = False,
-        yolo: bool = True,
+        fixup_output_dir: Path | None = None,
     ):
         """
         Initializes the classifier GUI.
@@ -111,13 +112,13 @@ class ImageClassifierGUI:
             output_root: Directory into which classified files should be placed.
             strip_confidence: If True, strip "Cxx" confidence prefix/suffix from filenames.
             use_secondary_confidence: If True, use the secondary confidence score for filtering.
-            yolo: If True, output annotations in YOLO format.
+            fixup_output_dir: If provided, copy images and metadata to this directory.
         """
         self.root = root
         self.image_paths = sorted(image_paths)
         self.key_map = key_map
         self.strip_confidence = strip_confidence
-        self.yolo = yolo
+        self.output_dir = fixup_output_dir
         self.class_to_id = {name: i for i, name in enumerate(sorted(self.key_map.values()))}
         self.id_to_class = {i: name for name, i in self.class_to_id.items()}
         self.colors = [
@@ -325,10 +326,6 @@ class ImageClassifierGUI:
             self._load_json_metadata(json_path)
             return
 
-        yolo_path = parent_dir / f"{base_filename}.txt"
-        if yolo_path.exists():
-            self._load_yolo_metadata(yolo_path)
-
     def display_image(self):
         """Loads and displays the next image in the queue."""
         self.bboxes = []
@@ -415,91 +412,20 @@ class ImageClassifierGUI:
 
         self.display_image()
 
-    def _load_yolo_metadata(self, yolo_path: Path):
-        with open(yolo_path) as f:
-            lines = f.readlines()
-
-        for line in lines:
-            parts = line.strip().split()
-            if not parts:
-                continue
-            class_id = int(parts[0])
-            x_center_norm = float(parts[1])
-            y_center_norm = float(parts[2])
-            width_norm = float(parts[3])
-            height_norm = float(parts[4])
-
-            x_center = x_center_norm * self.image_width
-            y_center = y_center_norm * self.image_height
-            half_box_width = width_norm * self.image_width * 0.5
-            half_box_height = height_norm * self.image_height * 0.5
-
-            x1 = round(x_center - half_box_width)
-            y1 = round(y_center - half_box_height)
-            x2 = round(x_center + half_box_width)
-            y2 = round(y_center + half_box_height)
-
-            label = self.id_to_class.get(class_id)
-            if label is None:
-                print(f"⚠️ Warning: Unknown class ID {class_id} in {yolo_path}")
-                continue
-
-            self.bboxes.append(
-                {
-                    "x1": x1,
-                    "y1": y1,
-                    "x2": x2,
-                    "y2": y2,
-                    "label": label,
-                }
-            )
-
-    def _save_yolo_format(self, filename: str, output_dir: Path):
-        txt_filename = os.path.splitext(filename)[0] + ".txt"
-        dest_path = output_dir / txt_filename
-        lines = []
-        for bbox in self.bboxes:
-            label = bbox["label"]
-            if not label:
-                continue
-
-            class_id = self.class_to_id[label]
-            x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
-
-            box_width = x2 - x1
-            box_height = y2 - y1
-            x_center = x1 + box_width / 2
-            y_center = y1 + box_height / 2
-
-            x_center_norm = x_center / self.image_width
-            y_center_norm = y_center / self.image_height
-            width_norm = box_width / self.image_width
-            height_norm = box_height / self.image_height
-
-            lines.append(f"{class_id} {x_center_norm:.6f} {y_center_norm:.6f} {width_norm:.6f} {height_norm:.6f}\n")
-
-        with open(dest_path, "w") as f:
-            f.writelines(lines)
-        if not lines:
-            print(f"✅ Saved empty: '{txt_filename}'")
-        else:
-            print(f"✅ Saved: '{txt_filename}'")
-
     def _load_json_metadata(self, json_path: Path):
         with open(json_path) as f:
             data = json.load(f)
 
         for label, bboxes in data.items():
             for bbox in bboxes:
-                self.bboxes.append(
-                    {
-                        "x1": bbox["x1"],
-                        "y1": bbox["y1"],
-                        "x2": bbox["x2"],
-                        "y2": bbox["y2"],
-                        "label": label,
-                    }
-                )
+                new_bbox = {
+                    "x1": bbox["x1"],
+                    "y1": bbox["y1"],
+                    "x2": bbox["x2"],
+                    "y2": bbox["y2"],
+                    "label": label,
+                }
+                self.bboxes.append(new_bbox)
 
     def _save_json_format(self, filename: str, output_dir: Path):
         json_filename = os.path.splitext(filename)[0] + ".json"
@@ -538,12 +464,14 @@ class ImageClassifierGUI:
             self.undo_stack.pop(0)
 
         filename = source_path.name
-        output_dir = source_path.parent
-
-        if self.yolo:
-            self._save_yolo_format(filename, output_dir)
+        if self.output_dir:
+            output_dir = self.output_dir
+            output_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy(source_path, output_dir / filename)
         else:
-            self._save_json_format(filename, output_dir)
+            output_dir = source_path.parent
+
+        self._save_json_format(filename, output_dir)
 
         self._update_after_removal()
 
@@ -664,7 +592,7 @@ def _find_sources(input_dirs: list[str], *, edit: bool = False) -> set[str]:
         # Skip if a label file already exists
         base_filename = filename.stem
         parent_dir = filename.parent
-        has_label = (parent_dir / f"{base_filename}.json").exists() or (parent_dir / f"{base_filename}.txt").exists()
+        has_label = (parent_dir / f"{base_filename}.json").exists()
         if edit:
             return has_label
         return not has_label
@@ -680,7 +608,7 @@ def _run_gui(
     *,
     strip_confidence: bool = False,
     use_secondary_confidence: bool = False,
-    yolo: bool = False,
+    fixup_output_dir: Path | None = None,
 ):
     root = tk.Tk()
     ImageClassifierGUI(
@@ -691,7 +619,7 @@ def _run_gui(
         max_confidence_threshold=max_confidence_threshold,
         strip_confidence=strip_confidence,
         use_secondary_confidence=use_secondary_confidence,
-        yolo=yolo,
+        fixup_output_dir=fixup_output_dir,
     )
     root.update_idletasks()
 
@@ -746,21 +674,22 @@ def main() -> int:
         action="store_true",
         help="Use the secondary confidence score (if present) for confidence thresholding.",
     )
-    parser.add_argument(
-        "--yolo",
-        action="store_true",
-        help="Do not emit YOLOv8 format output, use the default JSON format instead.",
-    )
-    parser.add_argument(
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
         "--edit",
         action="store_true",
         help="Edit existing classifications.",
+    )
+    group.add_argument(
+        "--fixup",
+        metavar="OUTPUT_DIR",
+        help="Edit existing classifications and save to a new directory. Incompatible with --edit.",
     )
     args = parser.parse_args()
 
     key_map = load_key_map(args.config)
 
-    image_paths = _find_sources(args.dirs, edit=args.edit)
+    image_paths = _find_sources(args.dirs, edit=args.edit or bool(args.fixup))
     if not image_paths:
         print("No JPG images found in the specified directories. Exiting.")
         return 0
@@ -781,7 +710,7 @@ def main() -> int:
         max_confidence_threshold=args.max_confidence_threshold,
         strip_confidence=args.strip_confidence,
         use_secondary_confidence=args.use_secondary_confidence,
-        yolo=not args.yolo,
+        fixup_output_dir=Path(args.fixup) if args.fixup else None,
     )
     return 0
 

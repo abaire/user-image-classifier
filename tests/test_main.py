@@ -69,7 +69,7 @@ def test_find_sources_skips_existing(tmp_path: Path):
 
     (input_dir / "image1.jpg").touch()
     (input_dir / "image2.jpg").touch()
-    (input_dir / "image2.txt").touch()  # Pre-existing label for image2
+    (input_dir / "image2.json").touch()  # Pre-existing label for image2
 
     found_files = _find_sources([str(input_dir)])
     assert found_files == {str(Path(input_dir / "image1.jpg"))}
@@ -148,9 +148,8 @@ def test_navigate(mock_gui):
     assert gui.current_index == 2
 
 
-def test_save_and_next_no_yolo(mock_gui):
+def test_save_and_next(mock_gui):
     gui, image_dir = mock_gui
-    gui.yolo = False  # Explicitly test the --no-yolo case
     initial_image_count = len(gui.image_paths)
     current_image_path = Path(gui.image_paths[gui.current_index])
     gui.canvas.delete = MagicMock()
@@ -198,42 +197,6 @@ def test_undo_last_bbox(mock_gui):
     gui._redraw_canvas.assert_called_once()
 
 
-def test_save_and_next_yolo_is_default(mock_gui):
-    gui, image_dir = mock_gui
-    gui.image_width = 200
-    gui.image_height = 200
-    initial_image_count = len(gui.image_paths)
-    current_image_path = Path(gui.image_paths[gui.current_index])
-    gui.canvas.delete = MagicMock()
-
-    # Simulate drawing and labeling two boxes
-    gui.bboxes = [
-        {"x1": 10, "y1": 10, "x2": 50, "y2": 50, "label": "class_a"},
-        {"x1": 60, "y1": 60, "x2": 100, "y2": 100, "label": "class_b"},
-    ]
-    gui.class_to_id = {"class_a": 0, "class_b": 1}
-
-    gui.save_and_next()
-
-    assert len(gui.image_paths) == initial_image_count - 1
-
-    txt_filename = current_image_path.stem + ".txt"
-    output_path = image_dir / txt_filename
-    assert output_path.exists()
-
-    with open(output_path) as f:
-        lines = f.readlines()
-
-    assert len(lines) == 2
-    # Expected: class_id x_center_norm y_center_norm width_norm height_norm
-    # Box 1 (class_a): x_center=30, y_center=30, width=40, height=40
-    # Norm: x_center=0.15, y_center=0.15, width=0.2, height=0.2
-    assert lines[0].strip() == "0 0.150000 0.150000 0.200000 0.200000"
-    # Box 2 (class_b): x_center=80, y_center=80, width=40, height=40
-    # Norm: x_center=0.4, y_center=0.4, width=0.2, height=0.2
-    assert lines[1].strip() == "1 0.400000 0.400000 0.200000 0.200000"
-
-
 def test_right_click_removes_bbox(mock_gui):
     gui, _ = mock_gui
     gui.image_on_canvas = 1
@@ -253,25 +216,8 @@ def test_right_click_removes_bbox(mock_gui):
     gui._redraw_canvas.assert_called_once()
 
 
-def test_save_and_next_empty_yolo(mock_gui):
-    gui, image_dir = mock_gui
-    gui.yolo = True
-    initial_image_count = len(gui.image_paths)
-    current_image_path = Path(gui.image_paths[gui.current_index])
-    gui.bboxes = []
-
-    gui.save_and_next()
-
-    assert len(gui.image_paths) == initial_image_count - 1
-    txt_filename = current_image_path.stem + ".txt"
-    output_path = image_dir / txt_filename
-    assert output_path.exists()
-    assert output_path.read_text() == ""
-
-
 def test_save_and_next_empty_json(mock_gui):
     gui, image_dir = mock_gui
-    gui.yolo = False
     initial_image_count = len(gui.image_paths)
     current_image_path = Path(gui.image_paths[gui.current_index])
     gui.bboxes = []
