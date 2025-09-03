@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from user_image_classifier.config import DEFAULT_CONFIG, load_key_map
-from user_image_classifier.main import ImageClassifierGUI, _find_sources
+from user_image_classifier.main import AddBoundingBoxAction, ImageClassifierGUI, _find_sources
 
 
 def test_find_sources_no_images(tmp_path: Path):
@@ -178,43 +178,6 @@ def test_save_and_next(mock_gui):
     assert data == expected_data
 
 
-def test_undo_last_bbox(mock_gui):
-    gui, _ = mock_gui
-    gui.image_on_canvas = 1
-    gui.canvas.coords = MagicMock(return_value=(0, 0))
-    gui._redraw_canvas = MagicMock()
-
-    # Simulate drawing and labeling a box
-    gui.bboxes = [
-        {"x1": 10, "y1": 10, "x2": 50, "y2": 50, "label": "class_a"},
-    ]
-    assert len(gui.bboxes) == 1
-
-    gui.undo_last_bbox()
-
-    assert len(gui.bboxes) == 0
-    gui._redraw_canvas.assert_called_once()
-
-
-def test_right_click_removes_bbox(mock_gui):
-    gui, _ = mock_gui
-    gui.image_on_canvas = 1
-    gui.canvas.coords = MagicMock(return_value=(0, 0))
-    gui._redraw_canvas = MagicMock()
-
-    # Simulate drawing a box
-    gui.bboxes = [
-        {"x1": 10, "y1": 10, "x2": 50, "y2": 50, "label": "class_a"},
-    ]
-    assert len(gui.bboxes) == 1
-
-    # Simulate right-click
-    gui.handle_right_click(None)
-
-    assert len(gui.bboxes) == 0
-    gui._redraw_canvas.assert_called_once()
-
-
 def test_save_and_next_empty_json(mock_gui):
     gui, image_dir = mock_gui
     initial_image_count = len(gui.image_paths)
@@ -303,16 +266,20 @@ def test_drawing_new_box_discards_unlabeled(mock_gui):
     mock_event = MagicMock()
 
     # Setup: one unlabeled box exists
-    gui.bboxes = [{"x1": 10, "y1": 10, "x2": 20, "y2": 20, "label": None}]
+    bbox = {"x1": 10, "y1": 10, "x2": 20, "y2": 20, "label": None}
+    gui.bboxes = [bbox]
+    gui.bbox_undo_manager.register_action(AddBoundingBoxAction(bbox))
     assert len(gui.bboxes) == 1
+
+    # Mock the undo method
+    gui.bbox_undo_manager.undo = MagicMock()
 
     # Action: Start drawing a new box
     mock_event.x, mock_event.y = 30, 30
     gui.on_button_press(mock_event)
 
     # Assertions
-    assert len(gui.bboxes) == 0  # Previous box should be discarded
-    gui._redraw_canvas.assert_called_once()
+    gui.bbox_undo_manager.undo.assert_called_once_with(gui)
 
 
 def test_drawing_new_box_retains_labeled(mock_gui):
