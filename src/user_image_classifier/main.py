@@ -351,6 +351,9 @@ class ImageClassifierGUI:
 
             if i == self.selected_bbox_index:
                 self.canvas.create_rectangle(
+                    x1, y1, x2, y2, fill=color, stipple="gray25", width=0, tags="bbox"
+                )
+                self.canvas.create_rectangle(
                     x1 + 2, y1 + 2, x2 - 2, y2 - 2, outline="white", width=2, dash=(4, 4), tags="bbox"
                 )
 
