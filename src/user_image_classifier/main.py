@@ -186,6 +186,7 @@ class ImageClassifierGUI:
         *,
         fixup_output_dir: Path | None = None,
         really_delete: bool = False,
+        copy: bool = False,
     ):
         """
         Initializes the classifier GUI.
@@ -195,13 +196,15 @@ class ImageClassifierGUI:
             image_paths: A set of absolute paths to the images to be classified.
             key_map: A dictionary mapping keyboard keys to directory names.
             output_root: Directory into which classified files should be placed.
-            fixup_output_dir: If provided, copy images and metadata to this directory.
+            fixup_output_dir: If provided, move committed images and metadata to this directory.
             really_delete: If True, permanently delete files.
+            copy: If True, copy images instead of moving them.
         """
         self.root = root
         self.image_paths = sorted(image_paths)
         self.key_map = key_map
-        self.output_dir = fixup_output_dir
+        self.output_dir = fixup_output_dir.expanduser() if fixup_output_dir else None
+        self.copy = copy
         self.really_delete = really_delete
         self.class_to_id = {name: i for i, name in enumerate(sorted(self.key_map.values()))}
         self.id_to_class = {i: name for name, i in self.class_to_id.items()}
@@ -350,9 +353,7 @@ class ImageClassifierGUI:
             bbox["rect"] = self.canvas.create_rectangle(x1, y1, x2, y2, outline=color, width=2, tags="bbox")
 
             if i == self.selected_bbox_index:
-                self.canvas.create_rectangle(
-                    x1, y1, x2, y2, fill=color, stipple="gray25", width=0, tags="bbox"
-                )
+                self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, stipple="gray25", width=0, tags="bbox")
                 self.canvas.create_rectangle(
                     x1 + 2, y1 + 2, x2 - 2, y2 - 2, outline="white", width=2, dash=(4, 4), tags="bbox"
                 )
@@ -601,7 +602,13 @@ class ImageClassifierGUI:
             output_filename = new_name + ext
 
             dest_path = output_dir / output_filename
-            shutil.move(source_path, dest_path)
+            if self.copy:
+                try:
+                    shutil.copy2(source_path, dest_path)
+                except PermissionError:
+                    shutil.copy(source_path, dest_path)
+            else:
+                shutil.move(source_path, dest_path)
             self.file_undo_manager.register_action(SaveFileAction(source_path, dest_path))
             self._save_json_format(output_filename, output_dir)
         else:
@@ -799,6 +806,7 @@ def _run_gui(
     *,
     fixup_output_dir: Path | None = None,
     really_delete: bool = False,
+    copy: bool = False,
 ):
     root = tk.Tk()
     ImageClassifierGUI(
@@ -807,6 +815,7 @@ def _run_gui(
         key_map,
         fixup_output_dir=fixup_output_dir,
         really_delete=really_delete,
+        copy=copy,
     )
     root.update_idletasks()
 
@@ -846,6 +855,7 @@ def main() -> int:
         metavar="OUTPUT_DIR",
         help="Edit existing classifications and save to a new directory.",
     )
+    parser.add_argument("--copy", action="store_true", help="In fixup mode, do not move or delete original files.")
     parser.add_argument(
         "--process-all-images", "-A", action="store_true", help="Process images without metadata in edit/fixup mode."
     )
@@ -877,6 +887,7 @@ def main() -> int:
         key_map,
         fixup_output_dir=Path(args.fixup) if args.fixup else None,
         really_delete=args.really_delete,
+        copy=args.copy,
     )
     return 0
 
