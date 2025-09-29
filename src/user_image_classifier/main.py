@@ -115,6 +115,18 @@ class SaveFileAction(UndoableAction):
 
 
 @dataclass
+class SkipFileAction(UndoableAction):
+    source_path: Path
+
+    def __post_init__(self):
+        self.description = "skip file"
+
+    def undo(self, gui: ImageClassifierGUI) -> None:
+        gui.image_paths.insert(gui.current_index, str(self.source_path))
+        gui.display_image()
+
+
+@dataclass
 class DeleteFileAction(UndoableAction):
     original_path: Path
     renamed_path: Path
@@ -230,9 +242,7 @@ class ImageClassifierGUI:
         self.root.title("Image Classifier")
 
         banner_text = " | ".join([f"'{key}': {folder}" for key, folder in self.key_map.items()])
-        banner_text += (
-            "\nDraw boxes with mouse. Press key to label. Space: Save and Next. Backspace: Undo Box. ESC: Quit"
-        )
+        banner_text += "\nDraw boxes with mouse. Press key to label. Space: Save and next. `: Skip and next. Backspace: Undo. ESC: Quit"
         banner_text += "\n+/-/=: Zoom | Shift+Arrows: Pan | F5/F6: Cycle Boxes"
         self.banner_label = tk.Label(self.root, text=banner_text, font=("Helvetica", 14), pady=5)
         self.banner_label.pack()
@@ -486,6 +496,12 @@ class ImageClassifierGUI:
                 self.bbox_undo_manager.undo(self)
             else:
                 self.file_undo_manager.undo(self)
+        elif key == "delete":
+            self.handle_delete_key()
+        elif key == "space":
+            self.save_and_next()
+        elif key in {"`", "~"}:
+            self.skip_and_next()
         elif key == "right":
             if event.state & 0x0001:  # Shift key
                 self.canvas.xview_scroll(1, "units")
@@ -509,10 +525,6 @@ class ImageClassifierGUI:
         elif key == "equals" or event.char == "=":
             self.zoom_level = 1.0
             self._redraw_canvas(0, 0)
-        elif key == "delete":
-            self.handle_delete_key()
-        elif key == "space":
-            self.save_and_next()
         elif event.char.lower() in self.key_map:
             self.add_label(event.char.lower())
 
@@ -615,6 +627,13 @@ class ImageClassifierGUI:
             output_dir = source_path.parent
             self._save_json_format(filename, output_dir)
 
+        self._update_after_removal()
+
+    def skip_and_next(self):
+        """Skips the current image and removes it from the queue without modification."""
+        source_path = Path(self.image_paths.pop(self.current_index))
+
+        self.file_undo_manager.register_action(SkipFileAction(source_path))
         self._update_after_removal()
 
     def add_label(self, key: str):
@@ -783,6 +802,9 @@ def _find_sources(input_dirs: list[str], *, edit: bool = False, process_all: boo
         if not filename.is_file():
             return False
 
+        if filename.name[0] == ".":
+            return False
+
         if filename.suffix[1:].lower() not in {"jpg", "jpeg"}:
             return False
 
@@ -874,12 +896,6 @@ def main() -> int:
         return 0
 
     print(f"Found {len(image_paths)} images to classify.\n")
-    print("--- Controls ---")
-    for key, folder in key_map.items():
-        print(f"  Press '{key}' -> move to '{folder}/'")
-    print("  Press 'u' -> Undo last move")
-    print("  Press 'space' -> Skip image (moves to end of queue)")
-    print("  Press 'q' or 'esc' -> Quit")
     print("----------------\n")
 
     _run_gui(
