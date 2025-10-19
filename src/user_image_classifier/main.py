@@ -500,7 +500,7 @@ class ImageClassifierGUI:
             self.handle_delete_key()
         elif key == "space":
             self.save_and_next()
-        elif key in {"`", "~"}:
+        elif key in {"`", "~", "grave"}:
             self.skip_and_next()
         elif key == "right":
             if event.state & 0x0001:  # Shift key
